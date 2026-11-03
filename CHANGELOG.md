@@ -4,7 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- `openai-responses:<model>` backend (`OpenAIResponses`) for the OpenAI Responses API, replaying encrypted reasoning between turns.
+- `openresponses:<model>` backend (`OpenResponses`) for the [Open Responses](https://www.openresponses.org) spec (OpenAI Responses API), replaying encrypted reasoning between turns. `openai-responses:` is kept as an alias.
+- `llms.txt` with a short usage guide for coding agents.
 
 ### Added
 - Exp. 8 replication harness for Qwen3.5-0.8B in `experiments/exp8`.
