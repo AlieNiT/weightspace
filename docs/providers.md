@@ -22,7 +22,7 @@ For vLLM, SGLang, Ollama or any OpenAI-compatible server, use `OpenAIChat(model,
 - OpenAI: `reasoning_effort` (Chat Completions) or `reasoning.effort` (Open Responses). Some models reject `"none"`, so set `OpenAIChat(..., off_effort="minimal")`.
 - OpenRouter: `reasoning.enabled` / `reasoning.effort`.
 - vLLM / SGLang chat templates: `OpenAIChat(..., thinking_style="chat_template")` sends `enable_thinking`.
-- Anthropic: adaptive thinking with `output_config.effort`, falling back to a token budget on models that don't support it. Prompt caching is on by default (`AnthropicChat(..., cache=False)` to turn it off).
+- Anthropic: adaptive thinking with `output_config.effort`, falling back to a token budget on models that don't support it. Models whose thinking is always on (Opus 5.5) reject `disabled`; there `thinking=False` falls back to `effort="low"`, where the model usually skips thinking, plus the act-directly prompt. `usage.thinking_tokens` in `result.json` shows how much it still thought. Prompt caching is on by default (`AnthropicChat(..., cache=False)` to turn it off).
 
 ## Fast mode
 

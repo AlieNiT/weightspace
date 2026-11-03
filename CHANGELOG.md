@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `openresponses:<model>` backend (`OpenResponses`) for the [Open Responses](https://www.openresponses.org) spec (OpenAI Responses API), replaying encrypted reasoning between turns. `openai-responses:` is kept as an alias.
 - `llms.txt` with a short usage guide for coding agents.
 - `speed=` on `Session`, `wsp.read/fix/write/improve` and backends (CLI `--speed` / `--fast`) for provider fast mode: Anthropic `speed`, OpenAI `service_tier`. Saved in `result.json`; the Exp. 8 script takes `--speed fast`.
+- Anthropic `thinking=False` falls back to `effort="low"` on models that can't disable thinking (Opus 5.5); `usage.thinking_tokens` is now recorded.
 
 ### Added
 - Exp. 8 replication harness for Qwen3.5-0.8B in `experiments/exp8`.

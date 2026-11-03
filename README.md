@@ -94,7 +94,7 @@ With thinking off, the provider's reasoning is disabled and the LLM is told to g
 | Open Responses | `reasoning.effort="none"` | `reasoning.effort=<level>` |
 | OpenRouter | `reasoning.enabled=false` | `reasoning.effort=<level>` |
 | vLLM / SGLang (Qwen3 etc.) | `OpenAIChat(..., thinking_style="chat_template")` → `enable_thinking=false` | `enable_thinking=true` |
-| Anthropic | `thinking.type="disabled"` | adaptive thinking with `effort=<level>` on newer models such as Opus 5.5; older models fall back to a token budget |
+| Anthropic | `thinking.type="disabled"`; on Opus 5.5, where thinking is always on, `effort="low"` instead | adaptive thinking with `effort=<level>` on newer models such as Opus 5.5; older models fall back to a token budget |
 
 CLI: `--no-thinking` or `--thinking low|medium|high|xhigh|max`. The setting is saved in `result.json`, so you can compare runs with and without thinking.
 

@@ -156,6 +156,20 @@ def test_anthropic_thinking():
     old.complete([{"role": "user", "content": "hi"}])
     assert len(calls) == 3
 
+    sent = []
+
+    def create_always_on(**kw):
+        sent.append(kw)
+        if kw.get("thinking") == {"type": "disabled"}:
+            raise ValueError('"thinking.type.disabled" is not supported for this model.')
+        return msg
+
+    on = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create_always_on)), thinking="off")
+    on.complete([{"role": "user", "content": "hi"}])
+    on.complete([{"role": "user", "content": "hi"}])
+    assert len(sent) == 3 and on.off_style == "low_effort"
+    assert sent[-1]["thinking"] == {"type": "adaptive"} and sent[-1]["output_config"] == {"effort": "low"}
+
 
 def test_openresponses_replays_items():
     from weightspace.llm import get_llm
