@@ -7,3 +7,4 @@ dist/
 runs/
 *.npz
 *.safetensors
+.mypy_cache/

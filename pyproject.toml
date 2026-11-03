@@ -8,17 +8,22 @@ version = "0.1.0"
 description = "Weight-space programming: let an LLM read and write neural network weights directly."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Marciano Theory SI" }]
 dependencies = ["numpy>=1.24"]
 keywords = ["llm", "interpretability", "model-editing", "weights", "pytorch"]
 classifiers = [
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 [project.urls]
-Homepage = "https://github.com/leofmarciano/weightspace"
-Source = "https://github.com/leofmarciano/weightspace"
+Homepage = "https://marcianotheory.com"
+Repository = "https://github.com/leofmarciano/weightspace"
+Issues = "https://github.com/leofmarciano/weightspace/issues"
+Changelog = "https://github.com/leofmarciano/weightspace/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 torch = ["torch>=2.1"]
@@ -26,7 +31,7 @@ hf = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4"]
 openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]
 all = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4", "openai>=1.40", "anthropic>=0.40"]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3"]
 
 [project.scripts]
 weightspace = "weightspace.cli:main"
@@ -47,3 +52,8 @@ ignore = ["E741", "B023"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disable_error_code = ["func-returns-value"]
