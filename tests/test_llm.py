@@ -98,6 +98,12 @@ def test_openai_thinking_styles():
     assert "reasoning_effort" not in _capture_openai(thinking="off", thinking_style=None)
 
 
+def test_openai_speed():
+    assert "service_tier" not in _capture_openai()
+    assert _capture_openai(speed="fast")["service_tier"] == "fast"
+    assert _capture_openai(speed=False)["service_tier"] == "default"
+
+
 def test_anthropic_thinking():
     from anthropic.types import Message
 
@@ -123,7 +129,10 @@ def test_anthropic_thinking():
 
     llm = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create)), max_tokens=4000)
     llm.complete([{"role": "user", "content": "hi"}])
-    assert "thinking" not in seen
+    assert "thinking" not in seen and "speed" not in seen
+    llm.speed = "fast"
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert seen["speed"] == "fast"
     llm.thinking = "off"
     llm.complete([{"role": "user", "content": "hi"}])
     assert seen["thinking"] == {"type": "disabled"}
@@ -146,6 +155,20 @@ def test_anthropic_thinking():
     assert "output_config" not in calls[-1] and old.thinking_style == "budget"
     old.complete([{"role": "user", "content": "hi"}])
     assert len(calls) == 3
+
+    sent = []
+
+    def create_always_on(**kw):
+        sent.append(kw)
+        if kw.get("thinking") == {"type": "disabled"}:
+            raise ValueError('"thinking.type.disabled" is not supported for this model.')
+        return msg
+
+    on = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create_always_on)), thinking="off")
+    on.complete([{"role": "user", "content": "hi"}])
+    on.complete([{"role": "user", "content": "hi"}])
+    assert len(sent) == 3 and on.off_style == "low_effort"
+    assert sent[-1]["thinking"] == {"type": "adaptive"} and sent[-1]["output_config"] == {"effort": "low"}
 
 
 def test_openresponses_replays_items():

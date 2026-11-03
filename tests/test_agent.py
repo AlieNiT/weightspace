@@ -134,3 +134,9 @@ def test_thinking_off_reaches_llm_and_prompt(arrays):
     llm = ScriptedLLM([reply(None, call("submit", answer="ok"))])
     wsp.read(dict(arrays), "?", llm)
     assert llm.thinking_seen == [None]
+
+
+def test_speed_reaches_llm_and_result(arrays):
+    llm = ScriptedLLM([reply(None, call("submit", answer="ok"))])
+    res = wsp.fix(dict(arrays), "fix", llm, speed=True)
+    assert llm.speed == "fast" and res.speed == "fast" and "speed=fast" in str(res)

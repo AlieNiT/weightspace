@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .base import LLM, LLMResponse, ToolCall, normalize_thinking
+from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 
 THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576, "max": 32000}
 
@@ -59,6 +59,7 @@ class AnthropicChat(LLM):
         client=None,
         thinking=None,
         thinking_style: str = "auto",
+        speed=None,
         cache: bool = True,
         **params,
     ):
@@ -72,16 +73,21 @@ class AnthropicChat(LLM):
         self.max_tokens = max_tokens
         self.params = params
         self.thinking = normalize_thinking(thinking)
+        self.speed = normalize_speed(speed)
         if thinking_style not in ("auto", "adaptive", "budget"):
             raise ValueError("thinking_style must be 'auto', 'adaptive' or 'budget'")
         self.thinking_style = thinking_style
         self.cache = cache
+        # models with always-on thinking (e.g. Opus 5.5) reject "disabled"; "off" then means lowest effort
+        self.off_style = "disabled"
 
     def _thinking_kwargs(self, style: str) -> tuple[dict, int]:
         t = normalize_thinking(self.thinking)
         if t is None:
             return {}, self.max_tokens
         if t == "off":
+            if self.off_style == "low_effort":
+                return {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low"}}, self.max_tokens
             return {"thinking": {"type": "disabled"}}, self.max_tokens
         if style == "budget":
             budget = THINKING_BUDGET[t]
@@ -94,6 +100,8 @@ class AnthropicChat(LLM):
             # prompt caching: everything up to the newest block is reused on the next step
             msgs[-1]["content"][-1] = {**msgs[-1]["content"][-1], "cache_control": {"type": "ephemeral"}}
         kw = dict(self.params)
+        if self.speed:
+            kw["speed"] = self.speed
         if system:
             kw["system"] = system
         if tools:
@@ -103,10 +111,14 @@ class AnthropicChat(LLM):
         try:
             r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
         except Exception as e:
-            if self.thinking_style != "auto" or "thinking" not in tk or "adaptive" not in str(e):
+            if tk.get("thinking") == {"type": "disabled"} and "disabled" in str(e):
+                self.off_style = "low_effort"
+            elif self.thinking_style == "auto" and "thinking" in tk and "adaptive" in str(e):
+                self.thinking_style = "budget"
+                style = "budget"
+            else:
                 raise
-            self.thinking_style = "budget"
-            tk, max_tokens = self._thinking_kwargs("budget")
+            tk, max_tokens = self._thinking_kwargs(style)
             r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
         if self.thinking_style == "auto":
             self.thinking_style = style
@@ -118,6 +130,9 @@ class AnthropicChat(LLM):
             elif b.type == "tool_use":
                 calls.append(ToolCall(b.id, b.name, dict(b.input)))
         usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
+        thinking_tokens = (usage.get("output_tokens_details") or {}).get("thinking_tokens")
+        if thinking_tokens is not None:
+            usage["thinking_tokens"] = thinking_tokens
         return LLMResponse(
             text="\n".join(text) or None,
             tool_calls=calls,
