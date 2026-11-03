@@ -1,0 +1,16 @@
+weightspace
+Copyright 2026 Marciano Theory SI
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project implements the method described in "Sparks of Weight-Space
+Programming" (Takehi, Teoh, Zhang, Khattab, 2026),
+https://rikiyat.github.io/blog/weight-space-programming/. The paper's code,
+logs and checkpoints are not redistributed here.
+
+It builds on third-party work:
+
+- NumPy (BSD-3-Clause), PyTorch (BSD-style), Hugging Face Transformers and
+  safetensors (Apache-2.0).
+- OpenAI and Anthropic Python SDKs (Apache-2.0 / MIT), used as optional
+  LLM backends.

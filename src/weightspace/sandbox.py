@@ -31,8 +31,10 @@ class Sandbox:
         try:
             tree = ast.parse(code, mode="exec")
             last = None
-            if tree.body and isinstance(tree.body[-1], ast.Expr):
-                last = ast.Expression(tree.body.pop().value)
+            tail = tree.body[-1] if tree.body else None
+            if isinstance(tail, ast.Expr):
+                tree.body.pop()
+                last = ast.Expression(tail.value)
             with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf), self._deadline():
                 exec(compile(tree, "<sandbox>", "exec"), self.ns)
                 if last is not None:

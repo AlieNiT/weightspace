@@ -1,4 +1,22 @@
-# weightspace
+<h1 align="center">weightspace</h1>
+
+<p align="center"><b>Let an LLM read and edit a neural network's weights directly.</b></p>
+
+<p align="center">
+  <a href="https://pypi.org/project/weightspace/"><img alt="PyPI" src="https://img.shields.io/pypi/v/weightspace"></a>
+  <a href="https://github.com/leofmarciano/weightspace/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/leofmarciano/weightspace/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-2ea44f"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776ab">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/README.md">Docs</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="experiments/exp8">Exp. 8 replication</a> ·
+  <a href="https://rikiyat.github.io/blog/weight-space-programming/">Paper</a> ·
+  <a href="https://marcianotheory.com">Marciano Theory</a>
+</p>
 
 A small Python framework for **weight-space programming**: an LLM reads and edits a neural network's weights directly, by reasoning about what each part computes, instead of training it.
 
@@ -17,7 +35,7 @@ Based on [Sparks of Weight-Space Programming](https://rikiyat.github.io/blog/wei
 ## Install
 
 ```bash
-pip install -e ".[all]"        # or pick: .[torch] .[hf] .[openai] .[anthropic]
+pip install "weightspace[all]"   # or pick: [torch] [hf] [openai] [anthropic]
 export OPENAI_API_KEY=...      # or ANTHROPIC_API_KEY / OPENROUTER_API_KEY
 ```
 
@@ -75,9 +93,9 @@ With thinking off, the provider's reasoning is disabled and the LLM is told to g
 | OpenAI | `reasoning_effort="none"` (`OpenAIChat(..., off_effort="minimal")` for gpt-5) | `reasoning_effort=<level>` |
 | OpenRouter | `reasoning.enabled=false` | `reasoning.effort=<level>` |
 | vLLM / SGLang (Qwen3 etc.) | `OpenAIChat(..., thinking_style="chat_template")` → `enable_thinking=false` | `enable_thinking=true` |
-| Anthropic | `thinking.type="disabled"` | extended thinking with a 2k / 8k / 16k token budget |
+| Anthropic | `thinking.type="disabled"` | adaptive thinking with `effort=<level>` on newer models such as Opus 5.5; older models fall back to a token budget |
 
-CLI: `--no-thinking` or `--thinking low|medium|high`. The setting is saved in `result.json`, so you can compare runs with and without thinking.
+CLI: `--no-thinking` or `--thinking low|medium|high|xhigh|max`. The setting is saved in `result.json`, so you can compare runs with and without thinking.
 
 ## Probes
 
@@ -139,10 +157,23 @@ weightspace fix model.safetensors "..." --llm anthropic:claude-sonnet-4-5 --save
 
 The system prompt tells the LLM not to train, fit weights to data, or run the network inside the sandbox; the only way to run it is the budgeted probes. The sandbox never holds the model object, but it is not a security boundary: code runs in your process, and an LLM could still multiply matrices by hand. Check transcripts if the rules matter for your experiment, as the paper's authors did.
 
-## Development
+## Contributing
+
+Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and conventions, [SECURITY.md](SECURITY.md) to report vulnerabilities, and [CHANGELOG.md](CHANGELOG.md) for releases.
 
 ```bash
 pip install -e ".[all,dev]"
-pytest
-ruff check . && ruff format --check .
+pytest && ruff check . && mypy src/weightspace
 ```
+
+## Citation
+
+If you use weightspace in research, cite the original paper and this repository ([CITATION.cff](CITATION.cff)).
+
+## License
+
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+---
+
+<p align="center">Marciano Theory SI</p>

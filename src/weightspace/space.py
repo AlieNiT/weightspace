@@ -294,7 +294,7 @@ class WeightSpace:
         return out
 
     def save_patch(self, path: str) -> None:
-        np.savez_compressed(path, **self.patch())
+        np.savez_compressed(path, **self.patch())  # type: ignore[arg-type]
 
     def apply_patch(self, patch: str | Mapping[str, np.ndarray]) -> None:
         if isinstance(patch, str):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from .base import LLM, LLMResponse, ToolCall, normalize_thinking
 
@@ -8,7 +9,8 @@ THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576, "
 
 
 def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
-    system, out = [], []
+    system: list = []
+    out: list[dict[str, Any]] = []
     for m in messages:
         role = m["role"]
         if role == "system":

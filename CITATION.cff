@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use weightspace, please cite it as below, along with the original paper."
+title: "weightspace: a framework for LLM-driven weight-space programming"
+authors:
+  - name: "Marciano Theory SI"
+  - family-names: "Marciano"
+    given-names: "Leonardo"
+license: Apache-2.0
+repository-code: "https://github.com/leofmarciano/weightspace"
+date-released: "2026-11-03"
+version: "0.1.0"
+keywords:
+  - weight-space-programming
+  - interpretability
+  - model-editing
+references:
+  - type: article
+    title: "Sparks of Weight-Space Programming"
+    authors:
+      - family-names: "Takehi"
+      - family-names: "Teoh"
+      - family-names: "Zhang"
+      - family-names: "Khattab"
+    year: 2026
+    url: "https://rikiyat.github.io/blog/weight-space-programming/"

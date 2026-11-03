@@ -107,6 +107,6 @@ def save_file(tensors: dict[str, np.ndarray], path: str) -> None:
 
         st_save({k: np.ascontiguousarray(v) for k, v in tensors.items()}, path)
     elif ext == ".npz":
-        np.savez_compressed(path, **tensors)
+        np.savez_compressed(path, **tensors)  # type: ignore[arg-type]
     else:
         raise ValueError(f"unsupported weights file: {path}")
