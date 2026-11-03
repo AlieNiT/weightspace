@@ -19,7 +19,8 @@ Things to know:
 - The LLM never gets the model object. It sees tensors through tools (list, describe, read slices, write) and a Python sandbox with `R` (read-only) and `W` (writable) dicts of numpy arrays, plus checkpoint / restore / revert.
 - The only way it can run the network is through probes: functions decorated with `@wsp.probe(cost=1)` whose docstring and arguments become the tool schema. `forward_budget` caps the total cost.
 - Lower level: `wsp.WeightSpace.from_torch / from_hf / from_file / from_numpy`, `ws.diff()`, `ws.save_patch()`, `ws.apply_patch()`, and `wsp.Session(ws, llm, mode=..., probes=..., namespace=..., max_steps=...).run(task)`.
-- `wsp.ScriptedLLM([...])` replays a fixed script for offline tests.
+- `wsp.ScriptedLLM([...])` replays a fixed script for offline tests; `wsp.ScriptedLLM.from_transcript(path)` replays a logged run.
+- Production: `pricing=(in, out)`, `token_budget` / `cost_budget` / `time_budget`, `res.stop_reason`, `res.tokens`, `res.cost`, `callbacks=[...]` (events, logging, `weightspace.otel.OpenTelemetryCallback`). Ctrl-C returns a partial result; API errors raise `wsp.SessionError` with `.result`.
 - The sandbox runs in your process and is not a security boundary.
 
 ## Docs
@@ -27,6 +28,7 @@ Things to know:
 - [README](https://raw.githubusercontent.com/leofmarciano/weightspace/main/README.md): quick start, thinking table, CLI
 - [Concepts](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/concepts.md): WeightSpace, sessions, modes, sandbox, what the LLM sees
 - [Probes and budgets](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/probes.md): letting the LLM run your network, and how much
+- [Production](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/production.md): budgets, cost, events, OpenTelemetry, parallel tools, replay
 - [Providers and thinking](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/providers.md): OpenAI, Open Responses, OpenRouter, vLLM, Anthropic, custom LLMs
 
 ## Examples

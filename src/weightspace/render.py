@@ -73,6 +73,17 @@ def stats(arr: np.ndarray) -> dict:
     }
 
 
+def singular_values(m: np.ndarray) -> np.ndarray:
+    """Singular values, descending. Uses the eigenvalues of the smaller Gram matrix for very rectangular
+    matrices (several times faster than an SVD there, accurate for the leading spectrum we report)."""
+    r, c = m.shape
+    if max(r, c) < 4 * min(r, c):
+        return np.linalg.svd(m, compute_uv=False)
+    g = m.T @ m if c < r else m @ m.T
+    ev = np.linalg.eigvalsh(g)[::-1]
+    return np.sqrt(np.clip(ev, 0, None))
+
+
 def describe(name: str, arr: np.ndarray, dtype: str = "", top_k: int = 8) -> str:
     """Structural summary: stats, row/col norms, spectrum for matrices."""
     arr = np.asarray(arr)
@@ -94,8 +105,8 @@ def describe(name: str, arr: np.ndarray, dtype: str = "", top_k: int = 8) -> str
             top = ", ".join(f"{i}:{fmt_num(norms[i], 3)}" for i in order[:top_k])
             low = ", ".join(f"{i}:{fmt_num(norms[i], 3)}" for i in order[::-1][:top_k])
             lines.append(f"{label} L2 norms ({norms.size}): largest {top} | smallest {low}")
-        if min(m.shape) <= 4096 and m.size <= 16_000_000:
-            sv = np.linalg.svd(m, compute_uv=False)
+        if min(m.shape) <= 4096 and m.size <= 64_000_000:
+            sv = singular_values(m)
             energy = np.cumsum(sv**2) / max(np.sum(sv**2), 1e-30)
             eff = int(np.searchsorted(energy, 0.9) + 1)
             lines.append(

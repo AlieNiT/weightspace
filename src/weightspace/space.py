@@ -133,6 +133,30 @@ class _Writable(Mapping):
         return f"<writable weights: {len(self)} tensors>"
 
 
+CHUNK = 1 << 20  # elements per block when diffing, so large tensors never get a full float64 copy
+
+
+def _tensor_diff(name: str, cur: np.ndarray, orig: np.ndarray) -> TensorDiff | None:
+    a, b = cur.reshape(-1), orig.reshape(-1)
+    changed, sq, base_sq, mx = 0, 0.0, 0.0, 0.0
+    for i in range(0, a.size, CHUNK):
+        ca, cb = a[i : i + CHUNK], b[i : i + CHUNK]
+        ne = ca != cb
+        n = int(np.count_nonzero(ne))
+        cb64 = cb.astype(np.float64)
+        base_sq += float(np.dot(cb64, cb64))
+        if not n:
+            continue
+        changed += n
+        d = ca[ne].astype(np.float64) - cb64[ne]
+        sq += float(np.dot(d, d))
+        mx = max(mx, float(np.abs(d).max()))
+    if not changed:
+        return None
+    l2, base = sq**0.5, base_sq**0.5
+    return TensorDiff(name, int(b.size), changed, l2, mx, l2 / base if base else float("inf"))
+
+
 class WeightSpace:
     """Named float tensors with edit tracking, checkpoints and patches."""
 
@@ -141,6 +165,7 @@ class WeightSpace:
         self._original: dict[str, np.ndarray] = {}
         self._checkpoints: dict[str, dict[str, np.ndarray]] = {}
         self._on_sync = on_sync
+        self._describe_cache: dict[str, str] = {}
         self.R = _ReadOnly(self)
         self.W = _Writable(self)
 
@@ -202,6 +227,19 @@ class WeightSpace:
             return self._original[name]
         return self.R[name]
 
+    def describe(self, name: str) -> str:
+        """Text summary of one tensor (see `weightspace.describe`); cached while the tensor is unedited."""
+        from .render import describe
+
+        if name not in self:
+            raise KeyError(f"unknown tensor {name!r}")
+        if name in self._original:
+            return describe(name, self.R[name], self.dtype(name))
+        out = self._describe_cache.get(name)
+        if out is None:
+            out = self._describe_cache[name] = describe(name, self.R[name], self.dtype(name))
+        return out
+
     # writing ----------------------------------------------------------------------
     def _snapshot(self, name: str) -> None:
         if name not in self._original:
@@ -238,24 +276,10 @@ class WeightSpace:
     def diff(self) -> DiffSummary:
         out = DiffSummary(total_params=self.numel(), changed_params=0)
         for name, orig in self._original.items():
-            cur = self._store.get(name)
-            delta = cur.astype(np.float64) - orig.astype(np.float64)
-            changed = int(np.count_nonzero(delta))
-            if not changed:
-                continue
-            l2 = float(np.linalg.norm(delta))
-            base = float(np.linalg.norm(orig.astype(np.float64)))
-            out.tensors.append(
-                TensorDiff(
-                    name=name,
-                    numel=int(orig.size),
-                    changed=changed,
-                    l2_delta=l2,
-                    max_abs_delta=float(np.abs(delta).max()),
-                    rel_delta=l2 / base if base else float("inf"),
-                )
-            )
-            out.changed_params += changed
+            t = _tensor_diff(name, self._store.get(name), orig)
+            if t is not None:
+                out.tensors.append(t)
+                out.changed_params += t.changed
         return out
 
     def revert(self, name: str | None = None) -> None:
@@ -279,6 +303,8 @@ class WeightSpace:
 
     def commit(self) -> None:
         """Accept current weights as the new baseline."""
+        for n in self._original:
+            self._describe_cache.pop(n, None)
         self._original.clear()
         self._checkpoints.clear()
 
@@ -286,11 +312,13 @@ class WeightSpace:
     def patch(self) -> dict[str, np.ndarray]:
         """Sparse patch: `<name>::idx` flat indices and `<name>::val` new values."""
         out: dict[str, np.ndarray] = {}
-        for t in self.diff().tensors:
-            cur = self._store.get(t.name).reshape(-1)
-            idx = np.flatnonzero(cur != self._original[t.name].reshape(-1))
-            out[f"{t.name}::idx"] = idx.astype(np.int64)
-            out[f"{t.name}::val"] = cur[idx].copy()
+        for name, orig in self._original.items():
+            cur, base = self._store.get(name).reshape(-1), orig.reshape(-1)
+            parts = [np.flatnonzero(cur[i : i + CHUNK] != base[i : i + CHUNK]) + i for i in range(0, cur.size, CHUNK)]
+            idx = np.concatenate(parts) if parts else np.empty(0, np.int64)
+            if idx.size:
+                out[f"{name}::idx"] = idx.astype(np.int64)
+                out[f"{name}::val"] = cur[idx].copy()
         return out
 
     def save_patch(self, path: str) -> None:
