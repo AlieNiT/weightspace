@@ -30,7 +30,7 @@ Based on [Sparks of Weight-Space Programming](https://rikiyat.github.io/blog/wei
 - **Budgeted forward passes.** You decide how the network may be run (scores, rollouts, generations, attention maps only...) by writing a `probe`, and how many times.
 - **Edit tracking.** Every run reports exactly how many weights changed, and exports a sparse patch.
 - **Text mode.** For small networks: dump every weight into the prompt and get one reply back, no tools (like the paper's first experiments).
-- **Providers.** OpenAI-compatible APIs (OpenAI, OpenRouter, vLLM, Ollama) and Anthropic, or your own `LLM` class.
+- **Providers.** OpenAI-compatible APIs (OpenAI, OpenRouter, vLLM, Ollama), [Open Responses](https://www.openresponses.org) (`openresponses:<model>`) and Anthropic, or your own `LLM` class.
 
 ## Install
 
@@ -91,6 +91,7 @@ With thinking off, the provider's reasoning is disabled and the LLM is told to g
 | Backend | off | on |
 |---|---|---|
 | OpenAI | `reasoning_effort="none"` (`OpenAIChat(..., off_effort="minimal")` for gpt-5) | `reasoning_effort=<level>` |
+| Open Responses | `reasoning.effort="none"` | `reasoning.effort=<level>` |
 | OpenRouter | `reasoning.enabled=false` | `reasoning.effort=<level>` |
 | vLLM / SGLang (Qwen3 etc.) | `OpenAIChat(..., thinking_style="chat_template")` → `enable_thinking=false` | `enable_thinking=true` |
 | Anthropic | `thinking.type="disabled"` | adaptive thinking with `effort=<level>` on newer models such as Opus 5.5; older models fall back to a token budget |

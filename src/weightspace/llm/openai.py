@@ -118,7 +118,7 @@ def to_responses_input(messages: list[dict]) -> tuple[str | None, list[dict]]:
                 items.extend(m["openai_output"])
                 continue
             if m.get("content"):
-                items.append({"role": "assistant", "content": m["content"]})
+                items.append({"type": "message", "role": "assistant", "content": m["content"]})
             for t in m.get("tool_calls") or []:
                 items.append(
                     {"type": "function_call", "call_id": t["id"], "name": t["name"], "arguments": json.dumps(t["arguments"])}
@@ -126,20 +126,22 @@ def to_responses_input(messages: list[dict]) -> tuple[str | None, list[dict]]:
         elif m["role"] == "tool":
             items.append({"type": "function_call_output", "call_id": m["tool_call_id"], "output": m["content"]})
         else:
-            items.append({"role": m["role"], "content": m["content"]})
+            items.append({"type": "message", "role": m["role"], "content": m["content"]})
     return ("\n\n".join(instructions) or None), items
 
 
-class OpenAIResponses(OpenAIChat):
-    """OpenAI Responses API. Needed by models that only allow reasoning together with tools there (e.g. gpt-6).
+class OpenResponses(OpenAIChat):
+    """Open Responses (https://www.openresponses.org), the open spec based on the OpenAI Responses API.
 
-    Runs stateless (`store=False`) and replays encrypted reasoning items between turns.
+    Works with OpenAI and any compliant server via `base_url`. Needed by models that only allow
+    reasoning together with tools there (e.g. gpt-6). Runs stateless (`store=False`) and replays
+    encrypted reasoning items between turns.
     """
 
     def __init__(self, model: str, **kw):
         kw.setdefault("thinking_style", "reasoning_effort")
         super().__init__(model, **kw)
-        self.name = f"openai-responses:{model}"
+        self.name = f"openresponses:{model}"
 
     def complete(self, messages, tools=None):
         instructions, items = to_responses_input(messages)
@@ -168,3 +170,6 @@ class OpenAIResponses(OpenAIChat):
                 calls.append(ToolCall(o["call_id"], o["name"], args))
         usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
         return LLMResponse(text="\n".join(texts) or None, tool_calls=calls, usage=usage, raw=r, extra={"openai_output": output})
+
+
+OpenAIResponses = OpenResponses
