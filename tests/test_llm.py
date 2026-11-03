@@ -129,4 +129,20 @@ def test_anthropic_thinking():
     assert seen["thinking"] == {"type": "disabled"}
     llm.thinking = "high"
     llm.complete([{"role": "user", "content": "hi"}])
-    assert seen["thinking"]["budget_tokens"] == 16384 and seen["max_tokens"] > 16384
+    assert seen["thinking"] == {"type": "adaptive"} and seen["output_config"] == {"effort": "high"}
+    assert llm.thinking_style == "adaptive"
+
+    calls = []
+
+    def create_old(**kw):
+        calls.append(kw)
+        if kw["thinking"]["type"] == "adaptive":
+            raise ValueError('"thinking.type.adaptive" is not supported for this model')
+        return msg
+
+    old = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create_old)), thinking="high")
+    old.complete([{"role": "user", "content": "hi"}])
+    assert calls[-1]["thinking"]["budget_tokens"] == 16384 and calls[-1]["max_tokens"] > 16384
+    assert "output_config" not in calls[-1] and old.thinking_style == "budget"
+    old.complete([{"role": "user", "content": "hi"}])
+    assert len(calls) == 3

@@ -4,7 +4,7 @@ import os
 
 from .base import LLM, LLMResponse, ToolCall, normalize_thinking
 
-THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384}
+THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576, "max": 32000}
 
 
 def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
@@ -41,7 +41,24 @@ def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
 
 
 class AnthropicChat(LLM):
-    def __init__(self, model: str, *, api_key: str | None = None, max_tokens: int = 16000, client=None, thinking=None, **params):
+    """Anthropic Messages API.
+
+    thinking_style: "adaptive" (thinking.type=adaptive + output_config.effort, newer models), "budget"
+    (thinking.type=enabled + budget_tokens, older models) or "auto" (adaptive, falling back to budget if the
+    model rejects it).
+    """
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: str | None = None,
+        max_tokens: int = 16000,
+        client=None,
+        thinking=None,
+        thinking_style: str = "auto",
+        **params,
+    ):
         if client is None:
             from anthropic import Anthropic
 
@@ -52,23 +69,40 @@ class AnthropicChat(LLM):
         self.max_tokens = max_tokens
         self.params = params
         self.thinking = normalize_thinking(thinking)
+        if thinking_style not in ("auto", "adaptive", "budget"):
+            raise ValueError("thinking_style must be 'auto', 'adaptive' or 'budget'")
+        self.thinking_style = thinking_style
+
+    def _thinking_kwargs(self, style: str) -> tuple[dict, int]:
+        t = normalize_thinking(self.thinking)
+        if t is None:
+            return {}, self.max_tokens
+        if t == "off":
+            return {"thinking": {"type": "disabled"}}, self.max_tokens
+        if style == "budget":
+            budget = THINKING_BUDGET[t]
+            return {"thinking": {"type": "enabled", "budget_tokens": budget}}, max(self.max_tokens, budget + 4096)
+        return {"thinking": {"type": "adaptive"}, "output_config": {"effort": t}}, self.max_tokens
 
     def complete(self, messages, tools=None):
         system, msgs = to_anthropic(messages)
         kw = dict(self.params)
-        max_tokens = self.max_tokens
-        t = normalize_thinking(self.thinking)
-        if t == "off":
-            kw["thinking"] = {"type": "disabled"}
-        elif t is not None:
-            budget = THINKING_BUDGET[t]
-            kw["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            max_tokens = max(max_tokens, budget + 4096)
         if system:
             kw["system"] = system
         if tools:
             kw["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools]
-        r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw)
+        style = "adaptive" if self.thinking_style == "auto" else self.thinking_style
+        tk, max_tokens = self._thinking_kwargs(style)
+        try:
+            r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
+        except Exception as e:
+            if self.thinking_style != "auto" or "thinking" not in tk or "adaptive" not in str(e):
+                raise
+            self.thinking_style = "budget"
+            tk, max_tokens = self._thinking_kwargs("budget")
+            r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
+        if self.thinking_style == "auto":
+            self.thinking_style = style
         text, calls, blocks = [], [], []
         for b in r.content:
             blocks.append(b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else dict(b))

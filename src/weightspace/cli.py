@@ -27,7 +27,9 @@ def main(argv=None) -> int:
         b.add_argument("--context", default="", help="text or @file with architecture/environment notes")
         b.add_argument("--text-mode", action="store_true", help="put all weights in the prompt, no tools")
         b.add_argument("--max-steps", type=int, default=60)
-        b.add_argument("--thinking", choices=["off", "low", "medium", "high"], help="reasoning of the editing LLM")
+        b.add_argument(
+            "--thinking", choices=["off", "low", "medium", "high", "xhigh", "max"], help="reasoning of the editing LLM"
+        )
         b.add_argument("--no-thinking", dest="thinking", action="store_const", const="off", help="same as --thinking off")
         b.add_argument("--out", help="directory for transcript, result.json, patch.npz")
         b.add_argument("--save-weights", help="write edited weights to .safetensors/.npz")

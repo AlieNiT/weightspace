@@ -37,7 +37,7 @@ class LLMResponse:
         return msg
 
 
-THINKING_LEVELS = ("off", "low", "medium", "high")
+THINKING_LEVELS = ("off", "low", "medium", "high", "xhigh", "max")
 
 
 def normalize_thinking(value) -> str | None:
