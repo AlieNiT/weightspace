@@ -82,6 +82,8 @@ def main():
     ap.add_argument("--practice", default="/root/exp/practice")
     ap.add_argument("--speed", choices=["fast"], help="speed of the editing LLM (provider fast mode)")
     ap.add_argument("--gpu-mem", type=float, default=0.8, help="vLLM memory share per probe call (split in two for paired runs)")
+    ap.add_argument("--init", help="edit.npz from a previous session to start from (it stays visible in diff())")
+    ap.add_argument("--note", help="text file appended to the task, e.g. the previous session's report")
     a = ap.parse_args()
     work = a.work
     os.makedirs(work, exist_ok=True)
@@ -100,6 +102,10 @@ def main():
                 sd[k] = v.float().numpy()
     ws = wsp.WeightSpace.from_numpy(sd)
     del sd
+    if a.init:
+        for n, v in np.load(a.init).items():
+            ws.W[n] = v
+        ws.checkpoint("init")
 
     practice = {}
     for name in ("gsm8k_train", "math_train", "aime"):
@@ -325,7 +331,14 @@ def main():
         verbose=True,
     )
     try:
-        res = s.run(TASK)
+        task = TASK
+        if a.note:
+            task += (
+                "\n\nThis continues an earlier session. The weights already contain its edit (checkpoint 'init'; "
+                "original(name) is still the unedited model) and your forward budget is fresh. "
+                "Its final report:\n\n" + open(a.note).read()
+            )
+        res = s.run(task)
         res.save(f"{work}/result")
         print(res)
     finally:
