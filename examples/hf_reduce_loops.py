@@ -37,9 +37,7 @@ def main():
     args = ap.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.model)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.float32, attn_implementation="eager"
-    ).eval()
+    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.float32, attn_implementation="eager").eval()
 
     def chat(p):
         if tok.chat_template:
