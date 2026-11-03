@@ -5,6 +5,7 @@ Pass `llm=` as a string or an `LLM` instance:
 | String | Backend | Key |
 |---|---|---|
 | `openai:<model>` | OpenAI Chat Completions | `OPENAI_API_KEY` |
+| `openai-responses:<model>` | OpenAI Responses API (needed for reasoning + tools on gpt-6 models) | `OPENAI_API_KEY` |
 | `openrouter:<model>` | OpenRouter | `OPENROUTER_API_KEY` |
 | `anthropic:<model>` | Anthropic Messages | `ANTHROPIC_API_KEY` |
 

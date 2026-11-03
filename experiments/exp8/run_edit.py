@@ -80,6 +80,7 @@ def main():
     ap.add_argument("--thinking", default="high")
     ap.add_argument("--work", default="/root/exp/work")
     ap.add_argument("--practice", default="/root/exp/practice")
+    ap.add_argument("--gpu-mem", type=float, default=0.8, help="vLLM memory share per probe call (split in two for paired runs)")
     a = ap.parse_args()
     work = a.work
     os.makedirs(work, exist_ok=True)
@@ -179,7 +180,7 @@ def main():
             runs["original"] = base
         if model in ("edited", "both"):
             runs["edited"] = build_ckpt(base, f"{work}/ckpt_edited", edited_tensors())
-        mem = 0.4 if len(runs) == 2 else 0.8
+        mem = a.gpu_mem / len(runs)
         t0 = time.time()
         procs = {
             m: (generate(c, items, n=n, max_tokens=max_tokens, out=f"{work}/gen_{k}_{m}.jsonl", gpu_mem=mem))
