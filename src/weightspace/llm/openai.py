@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 
+from ..usage import Usage
 from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 
 
@@ -45,6 +46,11 @@ class OpenAIChat(LLM):
       None                never send anything
 
     speed is sent as `service_tier` ("fast", "ultrafast", ...; "standard" maps to OpenAI's "default").
+
+    prompt_cache_key: True sends the run id as `prompt_cache_key` so every step of a run hits the same prompt
+    cache; a string is sent as is. Defaults to True on api.openai.com and off for other endpoints.
+    parallel_tool_calls, safety_identifier, ...: any other keyword is sent with every request.
+    max_retries / timeout: passed to the SDK client.
     """
 
     def __init__(
@@ -58,15 +64,24 @@ class OpenAIChat(LLM):
         thinking_style: str | None = "reasoning_effort",
         off_effort: str = "none",
         speed=None,
+        prompt_cache_key: bool | str | None = None,
+        max_retries: int = 4,
+        timeout: float | None = 900,
         **params,
     ):
+        base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         if client is None:
             from openai import OpenAI
 
             client = OpenAI(
                 api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-                base_url=base_url or os.environ.get("OPENAI_BASE_URL"),
+                base_url=base_url,
+                max_retries=max_retries,
+                timeout=timeout,
             )
+        if prompt_cache_key is None:
+            prompt_cache_key = not base_url or "api.openai.com" in base_url
+        self.prompt_cache_key = prompt_cache_key
         self.client = client
         self.model = model
         self.name = f"openai:{model}"
@@ -79,6 +94,14 @@ class OpenAIChat(LLM):
     def _speed_params(self, kw: dict) -> None:
         if self.speed:
             kw["service_tier"] = "default" if self.speed == "standard" else self.speed
+
+    def _cache_params(self, kw: dict) -> None:
+        if "prompt_cache_key" in kw or not self.prompt_cache_key:
+            return
+        if isinstance(self.prompt_cache_key, str):
+            kw["prompt_cache_key"] = self.prompt_cache_key
+        elif self.session_key:
+            kw["prompt_cache_key"] = f"weightspace-{self.session_key}"
 
     def _thinking_params(self, kw: dict) -> None:
         t, style = normalize_thinking(self.thinking), self.thinking_style
@@ -102,8 +125,11 @@ class OpenAIChat(LLM):
         kw = dict(self.params)
         self._thinking_params(kw)
         self._speed_params(kw)
+        self._cache_params(kw)
         if tools:
             kw["tools"] = to_openai_tools(tools)
+        else:
+            kw.pop("parallel_tool_calls", None)
         r = self.client.chat.completions.create(model=self.model, messages=to_openai_messages(messages), **kw)
         msg = r.choices[0].message
         calls = []
@@ -114,7 +140,14 @@ class OpenAIChat(LLM):
                 args = {"_raw": t.function.arguments}
             calls.append(ToolCall(t.id, t.function.name, args))
         usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
-        return LLMResponse(text=msg.content, tool_calls=calls, usage=usage, raw=r)
+        return LLMResponse(
+            text=msg.content,
+            tool_calls=calls,
+            usage=usage,
+            raw=r,
+            tokens=Usage.from_openai(usage),
+            stop_reason=getattr(r.choices[0], "finish_reason", None),
+        )
 
 
 def to_responses_input(messages: list[dict]) -> tuple[str | None, list[dict]]:
@@ -159,6 +192,7 @@ class OpenResponses(OpenAIChat):
         if t is not None and self.thinking_style is not None:
             kw["reasoning"] = {"effort": self.off_effort if t == "off" else t}
         self._speed_params(kw)
+        self._cache_params(kw)
         if instructions:
             kw["instructions"] = instructions
         if tools:
@@ -166,6 +200,8 @@ class OpenResponses(OpenAIChat):
                 {"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"]}
                 for t in tools
             ]
+        else:
+            kw.pop("parallel_tool_calls", None)
         r = self.client.responses.create(model=self.model, input=items, **kw)
         output = [o.model_dump(exclude_none=True) if hasattr(o, "model_dump") else dict(o) for o in r.output]
         texts, calls = [], []
@@ -179,7 +215,17 @@ class OpenResponses(OpenAIChat):
                     args = {"_raw": o.get("arguments")}
                 calls.append(ToolCall(o["call_id"], o["name"], args))
         usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
-        return LLMResponse(text="\n".join(texts) or None, tool_calls=calls, usage=usage, raw=r, extra={"openai_output": output})
+        incomplete = getattr(r, "incomplete_details", None)
+        stop = getattr(incomplete, "reason", None) or getattr(r, "status", None)
+        return LLMResponse(
+            text="\n".join(texts) or None,
+            tool_calls=calls,
+            usage=usage,
+            raw=r,
+            extra={"openai_output": output},
+            tokens=Usage.from_openai(usage),
+            stop_reason=stop if isinstance(stop, str) else None,
+        )
 
 
 OpenAIResponses = OpenResponses

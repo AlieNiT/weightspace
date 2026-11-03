@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Iterable
 
 from .base import LLM, LLMResponse, ToolCall
 
@@ -19,7 +20,7 @@ def reply(text: str | None = None, *calls: ToolCall) -> LLMResponse:
 class ScriptedLLM(LLM):
     """Replays a fixed script; each step is an LLMResponse or fn(messages, tools) -> LLMResponse.
 
-    Useful for tests and for replaying logged runs without paying for tokens.
+    Useful for tests and for replaying logged runs without paying for tokens (see `from_transcript`).
     """
 
     name = "scripted"
@@ -36,3 +37,25 @@ class ScriptedLLM(LLM):
             return reply("(script exhausted)")
         step = self.steps.pop(0)
         return step(messages, tools or []) if callable(step) else step
+
+    @classmethod
+    def from_transcript(cls, transcript: str | Iterable[dict]) -> ScriptedLLM:
+        """Replay the assistant turns of a logged run (`transcript.jsonl` or `Result.transcript`).
+
+        Re-running the same task over the same weights and probes reproduces the run's tool calls, edits and
+        answer offline. Tool outputs are recomputed, so a replay against different weights shows how the same
+        program behaves there.
+        """
+        if isinstance(transcript, str):
+            with open(transcript) as f:
+                messages = [json.loads(line) for line in f if line.strip()]
+        else:
+            messages = list(transcript)
+        steps: list[LLMResponse | Callable] = []
+        for m in messages:
+            if m.get("role") != "assistant":
+                continue
+            calls = [ToolCall(t["id"], t["name"], dict(t.get("arguments") or {})) for t in m.get("tool_calls") or []]
+            extra = {k: v for k, v in m.items() if k not in ("role", "content", "tool_calls")}
+            steps.append(LLMResponse(text=m.get("content"), tool_calls=calls, extra=extra))
+        return cls(steps)

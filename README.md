@@ -140,7 +140,23 @@ res = s.run("...")
 ```
 
 Custom tools: `wsp.tool("name", "description", x={"type": "number"})(fn)`.
-Offline runs and tests: `wsp.ScriptedLLM([...])` replays a fixed script.
+Offline runs and tests: `wsp.ScriptedLLM([...])` replays a fixed script, and
+`wsp.ScriptedLLM.from_transcript("runs/1/transcript.jsonl")` replays a logged run.
+
+## Production
+
+Budgets (`token_budget`, `cost_budget`, `time_budget`), cost tracking (`pricing=`), `stop_reason`, partial results
+on errors and Ctrl-C, OpenTelemetry tracing, parallel read-only tool calls and replay are covered in
+[docs/production.md](docs/production.md).
+
+```python
+from weightspace.otel import OpenTelemetryCallback
+
+res = wsp.fix(
+    model, task, llm="anthropic:claude-opus-5-5", pricing=(5, 25, 0.5, 6.25), cost_budget=5.0, callbacks=[OpenTelemetryCallback()]
+)
+print(res.stop_reason, res.tokens, res.cost)
+```
 
 ## CLI
 
@@ -148,6 +164,9 @@ Offline runs and tests: `wsp.ScriptedLLM([...])` replays a fixed script.
 weightspace inspect model.safetensors --describe
 weightspace read model.safetensors "What was this trained to do?" --llm openai:gpt-5 --context @notes.md
 weightspace fix model.safetensors "..." --llm anthropic:claude-sonnet-4-5 --save-weights fixed.safetensors --out runs/1
+weightspace fix model.safetensors "..." --llm openai:gpt-5 --probe probes.py:rollout --forward-budget 10 \
+    --price 1.25,10 --max-cost 2 --events events.jsonl --json
+weightspace fix model.safetensors "..." --replay runs/1/transcript.jsonl   # no tokens spent
 ```
 
 ## Examples

@@ -7,14 +7,16 @@ print(res)                  # answer + how many weights changed
 res.save("runs/fix-1")      # transcript, result.json, sparse patch
 """
 
-from .agent import ForwardCall, Result, Session, Tool, tool
+from .agent import ForwardCall, Result, Session, SessionError, Tool, tool
+from .events import ConsoleLogger, Event, EventLog, LoggingCallback, TranscriptWriter
 from .llm import LLM, LLMResponse, ScriptedLLM, ToolCall, get_llm
 from .probes import Probe, probe
 from .render import describe, fmt_array, parse_weights, render_space
 from .space import DiffSummary, NumpyStore, Store, WeightSpace
 from .tasks import as_weightspace, fix, improve, read, write
+from .usage import Pricing, Usage
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "WeightSpace",
@@ -22,7 +24,15 @@ __all__ = [
     "NumpyStore",
     "DiffSummary",
     "Session",
+    "SessionError",
     "Result",
+    "Event",
+    "ConsoleLogger",
+    "LoggingCallback",
+    "TranscriptWriter",
+    "EventLog",
+    "Usage",
+    "Pricing",
     "ForwardCall",
     "Tool",
     "tool",

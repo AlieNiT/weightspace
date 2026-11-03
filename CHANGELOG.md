@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-03
+
+### Added
+- Run events and callbacks (`callbacks=`): `LoggingCallback`, `EventLog`, `TranscriptWriter`, `ConsoleLogger`, and `weightspace.otel.OpenTelemetryCallback` with GenAI semantic-convention spans (`weightspace[otel]`).
+- `Usage` (tokens normalized across providers, incl. cache reads/writes and reasoning) and `Pricing`; `Result.tokens`, `cost`, `stop_reason`, `run_id`, `seconds`, `timings`, `error`, `ok`.
+- `token_budget`, `cost_budget` and `time_budget`: the LLM gets a last turn to submit when one runs out.
+- Ctrl-C returns a partial `Result`; API failures raise `SessionError` carrying the partial result.
+- Read-only tool calls of one turn run in parallel (`parallel_tools=`, `wsp.tool(..., parallel=True)`).
+- `ScriptedLLM.from_transcript` to replay logged runs offline; CLI `--replay`.
+- OpenAI `prompt_cache_key` per run on api.openai.com; `max_retries` / `timeout` on all backends; Anthropic streaming for long requests.
+- CLI: `--probe FILE.py:FN`, `--forward-budget`, `--price`, `--max-cost`, `--max-tokens`, `--max-time`, `--events`, `--json`, `--version`; exit code 2 when a run does not finish cleanly.
+- `py.typed` marker.
+
+### Changed
+- `ws.diff()` and `ws.patch()` run in blocks (about 6x faster and 50x less memory on large tensors); `describe_tensor` is cached and uses a Gram-matrix spectrum for tall/wide matrices.
+- The sandbox timeout works off the main thread and without SIGALRM; sandbox code runs under `torch.no_grad()`.
+- `agent.py` split into `tools.py`, `result.py`, `events.py` and `usage.py` (same public API).
+
 ## [0.2.0] - 2026-11-03
 
 ### Added
@@ -26,6 +44,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `thinking` switch (off / low / medium / high / xhigh / max), with adaptive thinking and prompt caching on Anthropic.
 - `weightspace` CLI and examples.
 
-[Unreleased]: https://github.com/leofmarciano/weightspace/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/leofmarciano/weightspace/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/leofmarciano/weightspace/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/leofmarciano/weightspace/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/leofmarciano/weightspace/releases/tag/v0.1.0

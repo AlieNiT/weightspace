@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from ..usage import Usage
 from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 
 THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576, "max": 32000}
@@ -48,6 +49,10 @@ class AnthropicChat(LLM):
     thinking_style: "adaptive" (thinking.type=adaptive + output_config.effort, newer models), "budget"
     (thinking.type=enabled + budget_tokens, older models) or "auto" (adaptive, falling back to budget if the
     model rejects it).
+
+    stream: send requests with streaming (recommended for long Opus turns: avoids idle-connection timeouts and
+    the SDK's refusal of very large non-streaming `max_tokens`). "auto" streams when `max_tokens` > 21333.
+    max_retries / timeout: passed to the SDK client (exponential backoff on 408/409/429/5xx and connection errors).
     """
 
     def __init__(
@@ -61,12 +66,16 @@ class AnthropicChat(LLM):
         thinking_style: str = "auto",
         speed=None,
         cache: bool = True,
+        stream: bool | str = "auto",
+        max_retries: int = 4,
+        timeout: float | None = 900,
         **params,
     ):
         if client is None:
             from anthropic import Anthropic
 
-            client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
+            client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"), max_retries=max_retries, timeout=timeout)
+        self.stream = stream
         self.client = client
         self.model = model
         self.name = f"anthropic:{model}"
@@ -109,7 +118,7 @@ class AnthropicChat(LLM):
         style = "adaptive" if self.thinking_style == "auto" else self.thinking_style
         tk, max_tokens = self._thinking_kwargs(style)
         try:
-            r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
+            r = self._create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
         except Exception as e:
             if tk.get("thinking") == {"type": "disabled"} and "disabled" in str(e):
                 self.off_style = "low_effort"
@@ -119,7 +128,7 @@ class AnthropicChat(LLM):
             else:
                 raise
             tk, max_tokens = self._thinking_kwargs(style)
-            r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
+            r = self._create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw, **tk)
         if self.thinking_style == "auto":
             self.thinking_style = style
         text, calls, blocks = [], [], []
@@ -139,4 +148,15 @@ class AnthropicChat(LLM):
             usage=usage,
             raw=r,
             extra={"anthropic_content": blocks},
+            tokens=Usage.from_anthropic(usage),
+            stop_reason=getattr(r, "stop_reason", None),
         )
+
+    def _create(self, **kw):
+        stream = self.stream
+        if stream == "auto":
+            stream = kw["max_tokens"] > 21333
+        if stream:
+            with self.client.messages.stream(**kw) as s:
+                return s.get_final_message()
+        return self.client.messages.create(**kw)
