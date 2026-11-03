@@ -57,6 +57,7 @@ class AnthropicChat(LLM):
         client=None,
         thinking=None,
         thinking_style: str = "auto",
+        cache: bool = True,
         **params,
     ):
         if client is None:
@@ -72,6 +73,7 @@ class AnthropicChat(LLM):
         if thinking_style not in ("auto", "adaptive", "budget"):
             raise ValueError("thinking_style must be 'auto', 'adaptive' or 'budget'")
         self.thinking_style = thinking_style
+        self.cache = cache
 
     def _thinking_kwargs(self, style: str) -> tuple[dict, int]:
         t = normalize_thinking(self.thinking)
@@ -86,6 +88,9 @@ class AnthropicChat(LLM):
 
     def complete(self, messages, tools=None):
         system, msgs = to_anthropic(messages)
+        if self.cache and msgs and msgs[-1]["content"]:
+            # prompt caching: everything up to the newest block is reused on the next step
+            msgs[-1]["content"][-1] = {**msgs[-1]["content"][-1], "cache_control": {"type": "ephemeral"}}
         kw = dict(self.params)
         if system:
             kw["system"] = system
