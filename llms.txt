@@ -1,0 +1,41 @@
+# weightspace
+
+> Python library that lets an LLM read and edit a neural network's weights directly, with no gradient descent. Works with PyTorch modules, Hugging Face models and .safetensors / .npz / .pt files. Apache-2.0, by Marciano Theory SI. Based on "Sparks of Weight-Space Programming" (https://rikiyat.github.io/blog/weight-space-programming/).
+
+Install with `pip install "weightspace[all]"` (extras: `torch`, `hf`, `openai`, `anthropic`) and set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`.
+
+Main entry points, all editing the model in place and returning a `Result` (answer, confidence, forward passes used, weight diff; `res.save(dir)` writes transcript.jsonl, result.json, patch.npz):
+
+- `wsp.read(model, task, llm=...)`: ask what a network does. `text_mode=True` puts every weight in the prompt instead of giving tools.
+- `wsp.fix(model, task, llm=..., probes=[...], forward_budget=N)`: find and fix the cause of a failure.
+- `wsp.write(model, task, llm=...)`: program a network from zeroed weights.
+- `wsp.improve(model, goal, llm=..., probes=[...], forward_budget=N)`: make it better at a goal.
+
+Things to know:
+
+- `llm` is a `provider:model` string (`openai:`, `openresponses:`, `openrouter:`, `anthropic:`) or an `LLM` instance. Use `openresponses:` (Open Responses / OpenAI Responses API) for models that need reasoning together with tools, such as gpt-6 models.
+- `thinking=False` (CLI `--no-thinking`) makes the editing LLM act with no reasoning; `"low"`...`"max"` set the level; `None` keeps the provider default.
+- The LLM never gets the model object. It sees tensors through tools (list, describe, read slices, write) and a Python sandbox with `R` (read-only) and `W` (writable) dicts of numpy arrays, plus checkpoint / restore / revert.
+- The only way it can run the network is through probes: functions decorated with `@wsp.probe(cost=1)` whose docstring and arguments become the tool schema. `forward_budget` caps the total cost.
+- Lower level: `wsp.WeightSpace.from_torch / from_hf / from_file / from_numpy`, `ws.diff()`, `ws.save_patch()`, `ws.apply_patch()`, and `wsp.Session(ws, llm, mode=..., probes=..., namespace=..., max_steps=...).run(task)`.
+- `wsp.ScriptedLLM([...])` replays a fixed script for offline tests.
+- The sandbox runs in your process and is not a security boundary.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/leofmarciano/weightspace/main/README.md): quick start, thinking table, CLI
+- [Concepts](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/concepts.md): WeightSpace, sessions, modes, sandbox, what the LLM sees
+- [Probes and budgets](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/probes.md): letting the LLM run your network, and how much
+- [Providers and thinking](https://raw.githubusercontent.com/leofmarciano/weightspace/main/docs/providers.md): OpenAI, Open Responses, OpenRouter, vLLM, Anthropic, custom LLMs
+
+## Examples
+
+- [fix_quadrants.py](https://raw.githubusercontent.com/leofmarciano/weightspace/main/examples/fix_quadrants.py): fix a sabotaged classifier (offline with a scripted LLM)
+- [read_which_task.py](https://raw.githubusercontent.com/leofmarciano/weightspace/main/examples/read_which_task.py): name the boolean function an MLP learned, weights in the prompt
+- [hf_reduce_loops.py](https://raw.githubusercontent.com/leofmarciano/weightspace/main/examples/hf_reduce_loops.py): edit a Hugging Face LM to stop repetition loops
+
+## Optional
+
+- [Exp. 8 replication](https://raw.githubusercontent.com/leofmarciano/weightspace/main/experiments/exp8/README.md): Qwen3.5-0.8B math with thinking on, 32k tokens
+- [CONTRIBUTING](https://raw.githubusercontent.com/leofmarciano/weightspace/main/CONTRIBUTING.md)
+- [CHANGELOG](https://raw.githubusercontent.com/leofmarciano/weightspace/main/CHANGELOG.md)
