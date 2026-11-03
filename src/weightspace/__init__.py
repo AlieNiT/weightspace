@@ -14,7 +14,7 @@ from .render import describe, fmt_array, parse_weights, render_space
 from .space import DiffSummary, NumpyStore, Store, WeightSpace
 from .tasks import as_weightspace, fix, improve, read, write
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "WeightSpace",
