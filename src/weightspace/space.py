@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from . import _chunks
+
 
 class Store:
     """Backend holding the live tensors. Subclasses adapt torch, HF, files..."""
@@ -133,27 +135,24 @@ class _Writable(Mapping):
         return f"<writable weights: {len(self)} tensors>"
 
 
-CHUNK = 1 << 20  # elements per block when diffing, so large tensors never get a full float64 copy
+def _tensor_diff(name: str, cur: np.ndarray, orig: np.ndarray, base_sq: float) -> TensorDiff | None:
+    a, b = _chunks.flat(cur), _chunks.flat(orig)
+    ab, bb = _chunks.bits(a), _chunks.bits(b)
 
-
-def _tensor_diff(name: str, cur: np.ndarray, orig: np.ndarray) -> TensorDiff | None:
-    a, b = cur.reshape(-1), orig.reshape(-1)
-    changed, sq, base_sq, mx = 0, 0.0, 0.0, 0.0
-    for i in range(0, a.size, CHUNK):
-        ca, cb = a[i : i + CHUNK], b[i : i + CHUNK]
-        ne = ca != cb
+    def block(i: int, j: int) -> tuple[int, float, float]:
+        ne = ab[i:j] != bb[i:j]
         n = int(np.count_nonzero(ne))
-        cb64 = cb.astype(np.float64)
-        base_sq += float(np.dot(cb64, cb64))
         if not n:
-            continue
-        changed += n
-        d = ca[ne].astype(np.float64) - cb64[ne]
-        sq += float(np.dot(d, d))
-        mx = max(mx, float(np.abs(d).max()))
+            return 0, 0.0, 0.0
+        d = a[i:j][ne].astype(np.float64) - b[i:j][ne]
+        return n, float(np.dot(d, d)), float(np.abs(d).max())
+
+    parts = _chunks.map_blocks(block, a.size)
+    changed = sum(p[0] for p in parts)
     if not changed:
         return None
-    l2, base = sq**0.5, base_sq**0.5
+    l2, base = sum(p[1] for p in parts) ** 0.5, base_sq**0.5
+    mx = max(p[2] for p in parts)
     return TensorDiff(name, int(b.size), changed, l2, mx, l2 / base if base else float("inf"))
 
 
@@ -163,9 +162,13 @@ class WeightSpace:
     def __init__(self, store: Store, *, on_sync: Callable[[], None] | None = None):
         self._store = store
         self._original: dict[str, np.ndarray] = {}
-        self._checkpoints: dict[str, dict[str, np.ndarray]] = {}
+        self._checkpoints: dict[str, dict[str, np.ndarray | tuple[np.ndarray, np.ndarray]]] = {}
         self._on_sync = on_sync
-        self._describe_cache: dict[str, str] = {}
+        self._names = list(store.names())
+        self._name_set = frozenset(self._names)
+        self._base_sq: dict[str, float] = {}  # squared L2 norm of each original, computed once
+        self._orig_fp: dict[str, tuple] = {}
+        self._describe_cache: dict[str, tuple[tuple | None, str]] = {}
         self.R = _ReadOnly(self)
         self.W = _Writable(self)
 
@@ -194,10 +197,9 @@ class WeightSpace:
 
     # reading ----------------------------------------------------------------------
     def names(self, pattern: str | None = None) -> list[str]:
-        names = self._store.names()
         if pattern:
-            names = [n for n in names if fnmatch.fnmatch(n, pattern) or pattern in n]
-        return names
+            return [n for n in self._names if fnmatch.fnmatch(n, pattern) or pattern in n]
+        return list(self._names)
 
     def shape(self, name: str) -> tuple[int, ...]:
         return self._store.shape(name)
@@ -208,19 +210,19 @@ class WeightSpace:
     def numel(self, name: str | None = None) -> int:
         if name is not None:
             return int(np.prod(self.shape(name), dtype=np.int64))
-        return sum(self.numel(n) for n in self.names())
+        return sum(self.numel(n) for n in self._names)
 
     def __getitem__(self, name: str) -> np.ndarray:
         return self.R[name]
 
     def __contains__(self, name: str) -> bool:
-        return name in self._store.names()
+        return name in self._name_set
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self.names())
+        return iter(self._names)
 
     def __len__(self) -> int:
-        return len(self.names())
+        return len(self._names)
 
     def original(self, name: str) -> np.ndarray:
         if name in self._original:
@@ -228,24 +230,35 @@ class WeightSpace:
         return self.R[name]
 
     def describe(self, name: str) -> str:
-        """Text summary of one tensor (see `weightspace.describe`); cached while the tensor is unedited."""
+        """Text summary of one tensor (see `weightspace.describe`), cached by content."""
         from .render import describe
 
         if name not in self:
             raise KeyError(f"unknown tensor {name!r}")
-        if name in self._original:
-            return describe(name, self.R[name], self.dtype(name))
-        out = self._describe_cache.get(name)
-        if out is None:
-            out = self._describe_cache[name] = describe(name, self.R[name], self.dtype(name))
+        key = self._content_key(name)
+        hit = self._describe_cache.get(name)
+        if hit is not None and hit[0] == key:
+            return hit[1]
+        out = describe(name, self.R[name], self.dtype(name))
+        self._describe_cache[name] = (key, out)
         return out
+
+    def _content_key(self, name: str) -> tuple | None:
+        """None while the tensor holds its original values, else a fingerprint of the current ones."""
+        if name not in self._original:
+            return None
+        cur = _chunks.fingerprint(self._store.get(name))
+        orig = self._orig_fp.get(name)
+        if orig is None:
+            orig = self._orig_fp[name] = _chunks.fingerprint(self._original[name])
+        return None if cur == orig else cur
 
     # writing ----------------------------------------------------------------------
     def _snapshot(self, name: str) -> None:
         if name not in self._original:
             if name not in self:
                 raise KeyError(f"unknown tensor {name!r}")
-            self._original[name] = self._store.get(name).copy()
+            self._original[name] = _chunks.copy(self._store.get(name))
 
     def edit(self, name: str) -> np.ndarray:
         """Return the live, writable array for `name` (in-place edits are tracked)."""
@@ -275,50 +288,70 @@ class WeightSpace:
     # diff / rollback ----------------------------------------------------------------
     def diff(self) -> DiffSummary:
         out = DiffSummary(total_params=self.numel(), changed_params=0)
-        for name, orig in self._original.items():
-            t = _tensor_diff(name, self._store.get(name), orig)
+        for name, orig in list(self._original.items()):
+            t = _tensor_diff(name, self._store.get(name), orig, self._base_norm(name))
             if t is not None:
                 out.tensors.append(t)
                 out.changed_params += t.changed
         return out
 
+    def _base_norm(self, name: str) -> float:
+        sq = self._base_sq.get(name)
+        if sq is None:
+            sq = self._base_sq[name] = _chunks.sum_squares(self._original[name])
+        return sq
+
     def revert(self, name: str | None = None) -> None:
         names = [name] if name else list(self._original)
         for n in names:
             if n in self._original:
-                self._store.get(n)[...] = self._original[n]
+                _chunks.copy_into(self._store.get(n), self._original[n])
 
     def checkpoint(self, label: str) -> None:
-        self._checkpoints[label] = {n: self._store.get(n).copy() for n in self._original}
+        """Save the current weights. Stored as a sparse delta from the originals (dense when most weights changed)."""
+        saved: dict[str, np.ndarray | tuple[np.ndarray, np.ndarray]] = {}
+        for n, orig in self._original.items():
+            cur = self._store.get(n)
+            idx = _chunks.changed_indices(cur, orig)
+            if 3 * idx.size > cur.size:
+                saved[n] = _chunks.copy(cur)
+            elif idx.size:
+                saved[n] = (idx, cur.reshape(-1)[idx])
+        self._checkpoints[label] = saved
 
     def restore(self, label: str) -> None:
         if label not in self._checkpoints:
             raise KeyError(f"no checkpoint {label!r}; have {list(self._checkpoints)}")
         saved = self._checkpoints[label]
-        for n in self._original:
-            self._store.get(n)[...] = saved.get(n, self._original[n])
+        for n, orig in self._original.items():
+            arr, s = self._store.get(n), saved.get(n)
+            if isinstance(s, np.ndarray):
+                _chunks.copy_into(arr, s)
+                continue
+            _chunks.copy_into(arr, orig)
+            if s is not None:
+                arr.put(s[0], s[1])
 
     def checkpoints(self) -> list[str]:
         return list(self._checkpoints)
 
     def commit(self) -> None:
         """Accept current weights as the new baseline."""
-        for n in self._original:
-            self._describe_cache.pop(n, None)
         self._original.clear()
+        self._base_sq.clear()
+        self._orig_fp.clear()
         self._checkpoints.clear()
 
     # patches ----------------------------------------------------------------------
     def patch(self) -> dict[str, np.ndarray]:
         """Sparse patch: `<name>::idx` flat indices and `<name>::val` new values."""
         out: dict[str, np.ndarray] = {}
-        for name, orig in self._original.items():
-            cur, base = self._store.get(name).reshape(-1), orig.reshape(-1)
-            parts = [np.flatnonzero(cur[i : i + CHUNK] != base[i : i + CHUNK]) + i for i in range(0, cur.size, CHUNK)]
-            idx = np.concatenate(parts) if parts else np.empty(0, np.int64)
+        for name, orig in list(self._original.items()):
+            cur = self._store.get(name)
+            idx = _chunks.changed_indices(cur, orig)
             if idx.size:
-                out[f"{name}::idx"] = idx.astype(np.int64)
-                out[f"{name}::val"] = cur[idx].copy()
+                out[f"{name}::idx"] = idx
+                out[f"{name}::val"] = cur.reshape(-1)[idx]
         return out
 
     def save_patch(self, path: str) -> None:
@@ -332,8 +365,7 @@ class WeightSpace:
             if not key.endswith("::idx"):
                 continue
             name = key[: -len("::idx")]
-            arr = self.edit(name).reshape(-1)
-            arr[patch[key]] = patch[f"{name}::val"]
+            self.edit(name).put(patch[key], patch[f"{name}::val"])
 
     def to_numpy(self) -> dict[str, np.ndarray]:
         return {n: self._store.get(n).copy() for n in self.names()}
