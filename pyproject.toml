@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weightspace"
-version = "0.1.0"
+version = "0.3.0"
 description = "Weight-space programming: let an LLM read and write neural network weights directly."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,8 +30,9 @@ torch = ["torch>=2.1"]
 hf = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4"]
 openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]
+otel = ["opentelemetry-api>=1.20"]
 all = ["torch>=2.1", "transformers>=4.40", "safetensors>=0.4", "openai>=1.40", "anthropic>=0.40"]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3"]
+dev = ["opentelemetry-sdk>=1.20", "pytest>=8", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3"]
 
 [project.scripts]
 weightspace = "weightspace.cli:main"

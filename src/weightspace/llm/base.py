@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..usage import Usage
+
 
 @dataclass
 class ToolCall:
@@ -30,6 +32,8 @@ class LLMResponse:
     usage: dict = field(default_factory=dict)
     raw: Any = None
     extra: dict = field(default_factory=dict)  # provider state to replay (e.g. thinking blocks)
+    tokens: Usage | None = None  # normalized usage; `usage` keeps the provider's raw counters
+    stop_reason: str | None = None
 
     def to_message(self) -> dict:
         msg = {"role": "assistant", "content": self.text, "tool_calls": [t.to_dict() for t in self.tool_calls]}
@@ -79,6 +83,7 @@ class LLM:
     name = "llm"
     thinking: str | None = None
     speed: str | None = None
+    session_key: str | None = None  # stable per-run id, used for prompt-cache routing where supported
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
         raise NotImplementedError

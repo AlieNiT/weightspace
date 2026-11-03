@@ -3,108 +3,36 @@
 from __future__ import annotations
 
 import json
-import os
-import re
+import threading
 import time
+import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from . import prompts
-from .llm import LLM, get_llm, normalize_speed, normalize_thinking
+from .events import CallbackLike, ConsoleLogger, Emitter, TranscriptWriter
+from .llm import LLM, LLMResponse, get_llm, normalize_speed, normalize_thinking
 from .probes import Probe
-from .render import describe, extract_blocks, fmt_array, parse_index, parse_weights, render_space
+from .render import extract_blocks, fmt_array, parse_index, parse_weights, render_space
+from .result import ForwardCall, Result
 from .sandbox import Sandbox
-from .space import DiffSummary, WeightSpace
+from .space import WeightSpace
+from .tools import Tool, tool
+from .usage import Pricing, Usage
 
 EDIT_MODES = ("fix", "write", "improve")
 
-
-@dataclass
-class Tool:
-    name: str
-    description: str
-    parameters: dict
-    fn: Callable[..., Any]
-
-    def spec(self) -> dict:
-        return {"name": self.name, "description": self.description, "parameters": self.parameters}
+__all__ = ["Session", "SessionError", "Tool", "tool", "Result", "ForwardCall", "EDIT_MODES"]
 
 
-def tool(name: str, description: str, /, **props) -> Callable[[Callable], Tool]:
-    """Small helper for custom tools: `tool("name", "desc", x={"type": "integer"})(fn)`."""
-    required = [k for k, v in props.items() if not v.pop("optional", False)]
+class SessionError(RuntimeError):
+    """The LLM request failed mid-run. `.result` holds everything up to the failure (transcript, edits, usage)."""
 
-    def wrap(fn):
-        return Tool(name, description, {"type": "object", "properties": props, "required": required}, fn)
-
-    return wrap
-
-
-@dataclass
-class ForwardCall:
-    probe: str
-    arguments: dict
-    output: str
-    cost: int
-    seconds: float
-
-
-@dataclass
-class Result:
-    answer: str
-    confidence: float | None
-    mode: str
-    thinking: str | None
-    diff: DiffSummary
-    forward_calls: list[ForwardCall]
-    forward_budget: int
-    steps: int
-    transcript: list[dict]
-    usage: dict
-    ws: WeightSpace = field(repr=False)
-    speed: str | None = None
-
-    @property
-    def forward_used(self) -> int:
-        return sum(c.cost for c in self.forward_calls)
-
-    def __str__(self) -> str:
-        conf = f" (confidence {self.confidence:.2f})" if self.confidence is not None else ""
-        think = f" thinking={self.thinking}" if self.thinking else ""
-        think += f" speed={self.speed}" if self.speed else ""
-        return (
-            f"[{self.mode}] {self.answer}{conf}\n"
-            f"steps={self.steps}{think} forward passes={self.forward_used}/{self.forward_budget}\n{self.diff}"
-        )
-
-    def save(self, directory: str) -> None:
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, "transcript.jsonl"), "w") as f:
-            for m in self.transcript:
-                f.write(json.dumps(m, default=str) + "\n")
-        summary = {
-            "mode": self.mode,
-            "thinking": self.thinking,
-            "speed": self.speed,
-            "answer": self.answer,
-            "confidence": self.confidence,
-            "steps": self.steps,
-            "forward_used": self.forward_used,
-            "forward_budget": self.forward_budget,
-            "forward_calls": [c.__dict__ for c in self.forward_calls],
-            "changed_params": self.diff.changed_params,
-            "total_params": self.diff.total_params,
-            "changed_fraction": self.diff.fraction,
-            "tensors": [t.__dict__ for t in self.diff.tensors],
-            "usage": self.usage,
-        }
-        with open(os.path.join(directory, "result.json"), "w") as f:
-            json.dump(summary, f, indent=2, default=str)
-        if self.diff.changed_params:
-            self.ws.save_patch(os.path.join(directory, "patch.npz"))
+    def __init__(self, message: str, result: Result):
+        super().__init__(message)
+        self.result = result
 
 
 class Session:
@@ -121,6 +49,13 @@ class Session:
                     (provider reasoning disabled and the LLM told to act directly), True or "low"/"medium"/"high"
     speed:          inference speed of the editing LLM: None = provider default, "fast" (or True) = fast mode
                     (same model, faster output, higher price), "standard", or a provider tier like "ultrafast"
+    callbacks:      observers of run events (see `weightspace.events`), e.g. `OpenTelemetryCallback()`
+    pricing:        `Pricing` (USD per million tokens) or a dict/tuple of it, to report and cap cost
+    token_budget, cost_budget, time_budget:
+                    stop asking for more work once the run has used this many tokens / USD / seconds; the LLM then
+                    gets one last turn to submit
+    parallel_tools: run read-only tool calls of one turn concurrently (number of worker threads; 1 = off)
+    no_grad:        run sandbox code under `torch.no_grad()` so autograd-based training fails
     """
 
     def __init__(
@@ -144,6 +79,13 @@ class Session:
         speed: bool | str | None = None,
         log_path: str | None = None,
         verbose: bool = False,
+        callbacks: Iterable[CallbackLike] = (),
+        pricing: Pricing | dict | tuple | None = None,
+        token_budget: int | None = None,
+        cost_budget: float | None = None,
+        time_budget: float | None = None,
+        parallel_tools: int = 8,
+        no_grad: bool = True,
     ):
         if mode not in prompts.MODES:
             raise ValueError(f"mode must be one of {list(prompts.MODES)}")
@@ -167,9 +109,26 @@ class Session:
             self.system_prompt += prompts.NO_THINKING
         self.log_path = log_path
         self.verbose = verbose
+        self.pricing = Pricing.coerce(pricing)
+        if cost_budget is not None and self.pricing is None:
+            raise ValueError("cost_budget needs pricing=")
+        self.token_budget, self.cost_budget, self.time_budget = token_budget, cost_budget, time_budget
+        self.parallel_tools = max(1, int(parallel_tools))
+        self.run_id = uuid.uuid4().hex[:12]
         self.forward_calls: list[ForwardCall] = []
         self.usage: dict[str, float] = {}
+        self.tokens = Usage()
+        self.timings: dict[str, dict[str, float]] = {}
         self._answer: tuple[str, float | None] | None = None
+        self._forward_lock = threading.Lock()
+        self._timing_lock = threading.Lock()
+        self._t0 = time.monotonic()
+
+        self.events = Emitter(callbacks)
+        if verbose:
+            self.events.add(ConsoleLogger())
+        if log_path:
+            self.events.add(TranscriptWriter(log_path))
 
         self.can_edit = mode in EDIT_MODES
         ns = {"np": np, "R": ws.R}
@@ -182,10 +141,13 @@ class Session:
         if self.can_edit:
             ns.update(W=ws.W, diff=ws.diff, checkpoint=ws.checkpoint, restore=ws.restore, revert=ws.revert)
         ns.update(namespace or {})
-        self.sandbox = Sandbox(ns, timeout=sandbox_timeout, max_output=max_tool_chars) if python else None
+        self.sandbox = Sandbox(ns, timeout=sandbox_timeout, max_output=max_tool_chars, no_grad=no_grad) if python else None
         self.tools: dict[str, Tool] = {}
         for t in [*self._builtin_tools(), *self._probe_tools(), *tools]:
             self.tools[t.name] = t
+        self.session_key = self.run_id
+        if hasattr(self.llm, "session_key") and getattr(self.llm, "session_key", None) is None:
+            self.llm.session_key = self.run_id
 
     # tools --------------------------------------------------------------------------
     def _builtin_tools(self) -> list[Tool]:
@@ -194,15 +156,20 @@ class Session:
             tool(
                 "list_tensors",
                 "List weight tensors (name, shape, dtype, numel). Optional glob/substring filter.",
+                parallel=True,
                 pattern={"type": "string", "optional": True},
             )(self._list_tensors),
             tool(
-                "describe_tensor", "Statistics of one tensor: quantiles, row/col norms, singular values.", name={"type": "string"}
-            )(lambda name: describe(name, ws[name], ws.dtype(name))),
+                "describe_tensor",
+                "Statistics of one tensor: quantiles, row/col norms, singular values.",
+                parallel=True,
+                name={"type": "string"},
+            )(ws.describe),
             tool(
                 "read_tensor",
                 f"Read raw values of a tensor or a numpy-style slice of it, e.g. index='0:4, :16'. "
                 f"At most {self.read_limit} values per call.",
+                parallel=True,
                 name={"type": "string"},
                 index={"type": "string", "optional": True},
                 precision={"type": "integer", "optional": True},
@@ -272,8 +239,7 @@ class Session:
         return "\n".join(lines) + f"\n{len(names)} tensors, {total:,} weights"
 
     def _read_tensor(self, name, index=None, precision=4):
-        arr = self.ws[name][parse_index(index)]
-        arr = np.asarray(arr)
+        arr = np.asarray(self.ws[name][parse_index(index)])
         if arr.size > self.read_limit:
             return f"slice has {arr.size:,} values (shape {arr.shape}); limit is {self.read_limit}. Read a smaller slice."
         return f"{name}[{index or ':'}] shape={arr.shape}\n{fmt_array(arr, precision or 4)}"
@@ -283,20 +249,144 @@ class Session:
         arr[parse_index(index)] = np.asarray(values, dtype=arr.dtype)
         return f"wrote {name}[{index or ':'}]\n{self.ws.diff()}"
 
+    @property
+    def forward_used(self) -> int:
+        return sum(c.cost for c in self.forward_calls)
+
     def _forward(self, p: Probe, args: dict) -> str:
-        remaining = self.forward_budget - sum(c.cost for c in self.forward_calls)
-        if p.cost > remaining:
-            return f"forward budget exhausted ({remaining} left, this probe costs {p.cost}). Submit your answer."
-        self.ws.sync()
-        t0 = time.time()
-        out = p.fn(**args)
-        text = out if isinstance(out, str) else json.dumps(out, indent=1, default=_jsonable)
-        self.forward_calls.append(ForwardCall(p.name, args, text, p.cost, time.time() - t0))
+        with self._forward_lock:
+            remaining = self.forward_budget - self.forward_used
+            if p.cost > remaining:
+                return f"forward budget exhausted ({remaining} left, this probe costs {p.cost}). Submit your answer."
+            self.ws.sync()
+            t0 = time.monotonic()
+            out = p.fn(**args)
+            text = out if isinstance(out, str) else json.dumps(out, indent=1, default=_jsonable)
+            self.forward_calls.append(ForwardCall(p.name, args, text, p.cost, time.monotonic() - t0))
         return text + f"\n[forward budget: {remaining - p.cost} of {self.forward_budget} left]"
 
     def _submit(self, answer, confidence=None):
-        self._answer = (str(answer), None if confidence is None else float(confidence))
+        try:
+            conf = None if confidence is None else float(confidence)
+        except (TypeError, ValueError):
+            conf = None
+        self._answer = (str(answer), conf)
         return "submitted"
+
+    # observability ------------------------------------------------------------------
+    def _emit(self, type: str, step: int, **data) -> None:
+        self.events.emit(type, self.run_id, step, **data)
+
+    def _time(self, key: str, seconds: float) -> None:
+        with self._timing_lock:
+            t = self.timings.setdefault(key, {"calls": 0, "seconds": 0.0})
+            t["calls"] += 1
+            t["seconds"] = round(t["seconds"] + seconds, 4)
+
+    def _append(self, messages: list[dict], msg: dict, step: int) -> None:
+        messages.append(msg)
+        self._emit("message", step, message=msg)
+
+    @property
+    def cost(self) -> float | None:
+        return self.pricing.cost(self.tokens) if self.pricing else None
+
+    def _over_budget(self) -> str | None:
+        if self.token_budget is not None and self.tokens.total_tokens >= self.token_budget:
+            return "token_budget"
+        if self.cost_budget is not None and (self.cost or 0.0) >= self.cost_budget:
+            return "cost_budget"
+        if self.time_budget is not None and time.monotonic() - self._t0 >= self.time_budget:
+            return "time_budget"
+        return None
+
+    def _add_usage(self, usage: dict) -> None:
+        for k, v in (usage or {}).items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                self.usage[k] = self.usage.get(k, 0) + v
+
+    def _complete(self, messages: list[dict], specs: list[dict] | None, step: int) -> LLMResponse:
+        self._emit("llm_start", step, messages=len(messages), tools=len(specs or []))
+        t0 = time.monotonic()
+        try:
+            resp = self.llm.complete(messages, specs)
+        except BaseException as e:
+            seconds = time.monotonic() - t0
+            self._time("llm", seconds)
+            self._emit("llm_end", step, seconds=seconds, usage={}, stop_reason=None, tool_calls=0, error=repr(e))
+            raise
+        seconds = time.monotonic() - t0
+        self._time("llm", seconds)
+        self._add_usage(resp.usage)
+        tokens = resp.tokens if resp.tokens is not None else Usage(requests=1)
+        self.tokens = self.tokens + tokens
+        self._emit(
+            "llm_end",
+            step,
+            seconds=seconds,
+            usage=tokens.to_dict(),
+            stop_reason=resp.stop_reason,
+            tool_calls=len(resp.tool_calls),
+        )
+        return resp
+
+    # tool execution -----------------------------------------------------------------
+    def _exec_tool(self, name: str, args: dict, call_id: str = "", step: int = 0) -> str:
+        t = self.tools.get(name)
+        self._emit("tool_start", step, call_id=call_id, name=name, arguments=args)
+        t0, error = time.monotonic(), False
+        used = self.forward_used
+        if t is None:
+            out = f"unknown tool {name!r}; available: {', '.join(self.tools)}"
+            error = True
+        elif set(args) == {"_raw"}:
+            out = f"invalid JSON arguments for {name}: {str(args['_raw'])[:200]!r}"
+            error = True
+        else:
+            try:
+                out = t.fn(**args)
+            except Exception as e:  # surface errors to the LLM instead of crashing the run
+                out, error = f"{type(e).__name__}: {e}", True
+        out = out if isinstance(out, str) else json.dumps(out, default=_jsonable)
+        if len(out) > self.max_tool_chars:
+            out = out[: self.max_tool_chars] + f"\n... [truncated {len(out) - self.max_tool_chars:,} chars]"
+        seconds = time.monotonic() - t0
+        self._time(f"tool:{name}", seconds)
+        self._emit(
+            "tool_end",
+            step,
+            call_id=call_id,
+            name=name,
+            seconds=seconds,
+            output_chars=len(out),
+            error=error,
+            cost=self.forward_used - used,
+        )
+        return out
+
+    def _exec_calls(self, calls, step: int) -> list[str]:
+        """Run one turn's tool calls in order; consecutive read-only calls run concurrently."""
+        outs: list[str] = [""] * len(calls)
+        i = 0
+        while i < len(calls):
+            j = i
+            while j < len(calls) and self._parallel_ok(calls[j].name):
+                j += 1
+            if j - i > 1 and self.parallel_tools > 1:
+                with ThreadPoolExecutor(min(self.parallel_tools, j - i), thread_name_prefix="weightspace-tool") as pool:
+                    futs = [pool.submit(self._exec_tool, c.name, c.arguments, c.id, step) for c in calls[i:j]]
+                    for k, f in enumerate(futs):
+                        outs[i + k] = f.result()
+                i = j
+                continue
+            c = calls[i]
+            outs[i] = self._exec_tool(c.name, c.arguments, c.id, step)
+            i += 1
+        return outs
+
+    def _parallel_ok(self, name: str) -> bool:
+        t = self.tools.get(name)
+        return t is not None and t.parallel
 
     # loop ---------------------------------------------------------------------------
     def _intro(self, task: str) -> str:
@@ -313,87 +403,84 @@ class Session:
         parts.append(f"## Forward passes (budget {self.forward_budget})\n{probes}")
         return "\n\n".join(parts)
 
-    def _log(self, msg: dict) -> None:
-        if self.verbose:
-            role = msg["role"]
-            body = msg.get("content") or ""
-            calls = msg.get("tool_calls") or []
-            print(f"--- {role}{' ' + msg.get('name', '') if role == 'tool' else ''}")
-            if body:
-                print(body if len(body) < 2000 else body[:2000] + " ...")
-            for c in calls:
-                print(f">>> {c['name']}({json.dumps(c['arguments'])[:1500]})")
-        if self.log_path:
-            with open(self.log_path, "a") as f:
-                f.write(json.dumps(msg, default=str) + "\n")
-
-    def _add_usage(self, usage: dict) -> None:
-        for k, v in (usage or {}).items():
-            if isinstance(v, (int, float)):
-                self.usage[k] = self.usage.get(k, 0) + v
-
-    def _exec_tool(self, name: str, args: dict) -> str:
-        t = self.tools.get(name)
-        if t is None:
-            return f"unknown tool {name!r}"
-        try:
-            out = t.fn(**args)
-        except Exception as e:  # surface errors to the LLM instead of crashing the run
-            out = f"{type(e).__name__}: {e}"
-        out = out if isinstance(out, str) else json.dumps(out, default=_jsonable)
-        if len(out) > self.max_tool_chars:
-            out = out[: self.max_tool_chars] + f"\n... [truncated {len(out) - self.max_tool_chars:,} chars]"
-        return out
+    def _start(self, task: str) -> None:
+        self._t0 = time.monotonic()
+        self._emit(
+            "run_start",
+            0,
+            mode=self.mode,
+            llm=getattr(self.llm, "name", type(self.llm).__name__),
+            task=task,
+            tools=list(self.tools),
+            forward_budget=self.forward_budget,
+        )
 
     def run(self, task: str) -> Result:
-        messages = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": self._intro(task)}]
-        for m in messages:
-            self._log(m)
+        """Run the agent loop until the LLM submits, a limit is hit, or the run is interrupted (Ctrl-C)."""
+        self._start(task)
+        messages: list[dict] = []
+        for m in ({"role": "system", "content": self.system_prompt}, {"role": "user", "content": self._intro(task)}):
+            self._append(messages, m, 0)
         specs = [t.spec() for t in self.tools.values()]
-        steps, nudges = 0, 0
-        while self._answer is None and steps < self.max_steps:
-            steps += 1
-            resp = self.llm.complete(messages, specs)
-            self._add_usage(resp.usage)
-            msg = resp.to_message()
-            messages.append(msg)
-            self._log(msg)
-            if not resp.tool_calls:
-                if nudges >= 2:
-                    self._answer = (resp.text or "", None)
+        steps, nudges, stop = 0, 0, None
+        try:
+            while self._answer is None and steps < self.max_steps:
+                stop = self._over_budget()
+                if stop:
                     break
-                nudges += 1
-                messages.append({"role": "user", "content": "Continue using the tools, or call `submit` when done."})
-                continue
-            for c in resp.tool_calls:
-                out = self._exec_tool(c.name, c.arguments)
-                tmsg = {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": out}
-                messages.append(tmsg)
-                self._log(tmsg)
-        if self._answer is None:
-            messages.append({"role": "user", "content": "Step limit reached. Call `submit` now."})
-            resp = self.llm.complete(messages, [self.tools["submit"].spec()])
-            self._add_usage(resp.usage)
-            messages.append(resp.to_message())
-            for c in resp.tool_calls:
-                if c.name == "submit":
-                    self._exec_tool("submit", c.arguments)
+                steps += 1
+                self._emit("step_start", steps)
+                resp = self._complete(messages, specs, steps)
+                self._append(messages, resp.to_message(), steps)
+                if not resp.tool_calls:
+                    if nudges >= 2:
+                        self._answer = (resp.text or "", None)
+                        stop = "answered"
+                        break
+                    nudges += 1
+                    self._append(
+                        messages, {"role": "user", "content": "Continue using the tools, or call `submit` when done."}, steps
+                    )
+                    continue
+                for c, out in zip(resp.tool_calls, self._exec_calls(resp.tool_calls, steps), strict=True):
+                    self._append(messages, {"role": "tool", "tool_call_id": c.id, "name": c.name, "content": out}, steps)
             if self._answer is None:
-                self._answer = (resp.text or "(no answer)", None)
-        self.ws.sync()
-        return self._result(messages, steps)
+                stop = stop or "max_steps"
+                why = "Step limit reached." if stop == "max_steps" else f"Run limit reached ({stop.replace('_', ' ')})."
+                self._append(messages, {"role": "user", "content": f"{why} Call `submit` now."}, steps)
+                resp = self._complete(messages, [self.tools["submit"].spec()], steps + 1)
+                self._append(messages, resp.to_message(), steps + 1)
+                for c in resp.tool_calls:
+                    if c.name == "submit":
+                        self._exec_tool("submit", c.arguments, c.id, steps + 1)
+                if self._answer is None:
+                    self._answer = (resp.text or "(no answer)", None)
+        except KeyboardInterrupt:
+            return self._finish(messages, steps, "interrupted")
+        except Exception as e:
+            res = self._finish(messages, steps, "error", error=f"{type(e).__name__}: {e}")
+            raise SessionError(f"run {self.run_id} failed at step {steps}: {e}", res) from e
+        return self._finish(messages, steps, stop or "submitted")
 
     def run_text(self, task: str, precision: int = 3, max_chars: int = 2_000_000) -> Result:
         """No tools: all weights go into the prompt, one reply comes back (Experiments 1-5 style)."""
         dump = render_space(self.ws, precision)
         if len(dump) > max_chars:
             raise ValueError(f"weights render to {len(dump):,} chars (> {max_chars:,}); use run() with tools instead")
+        self._start(task)
         fmt = prompts.TEXT_MODE_EDIT if self.can_edit else prompts.TEXT_MODE_READ
         user = f"{self._intro(task).split('## Weights')[0]}## Weights\n{dump}\n\n{fmt}"
-        messages = [{"role": "system", "content": self.system_prompt}, {"role": "user", "content": user}]
-        resp = self.llm.complete(messages, None)
-        self._add_usage(resp.usage)
-        messages.append(resp.to_message())
+        messages: list[dict] = []
+        for m in ({"role": "system", "content": self.system_prompt}, {"role": "user", "content": user}):
+            self._append(messages, m, 0)
+        try:
+            resp = self._complete(messages, None, 1)
+        except KeyboardInterrupt:
+            return self._finish(messages, 0, "interrupted")
+        except Exception as e:
+            res = self._finish(messages, 0, "error", error=f"{type(e).__name__}: {e}")
+            raise SessionError(f"run {self.run_id} failed: {e}", res) from e
+        self._append(messages, resp.to_message(), 1)
         text = resp.text or ""
         if self.can_edit:
             notes = []
@@ -404,8 +491,9 @@ class Session:
                 for name, arr in parse_weights(block).items():
                     self.ws.set(name, arr.reshape(self.ws.shape(name)))
             if notes:
-                messages.append({"role": "tool", "tool_call_id": "text-mode", "name": "python", "content": "\n".join(notes)})
-            self.ws.sync()
+                self._append(
+                    messages, {"role": "tool", "tool_call_id": "text-mode", "name": "python", "content": "\n".join(notes)}, 1
+                )
         answer = _field(text, "ANSWER") or text.strip()
         conf = _field(text, "CONFIDENCE")
         try:
@@ -413,11 +501,16 @@ class Session:
         except ValueError:
             confidence = None
         self._answer = (answer, confidence)
-        return self._result(messages, 1)
+        return self._finish(messages, 1, "submitted")
 
-    def _result(self, messages, steps) -> Result:
+    def _finish(self, messages: list[dict], steps: int, stop_reason: str, error: str | None = None) -> Result:
+        try:
+            self.ws.sync()
+        except Exception as e:  # never lose the transcript because a flush failed
+            error = error or f"sync failed: {type(e).__name__}: {e}"
         answer, conf = self._answer or ("", None)
-        return Result(
+        seconds = time.monotonic() - self._t0
+        res = Result(
             answer=answer,
             confidence=conf,
             mode=self.mode,
@@ -430,10 +523,33 @@ class Session:
             usage=self.usage,
             ws=self.ws,
             speed=self.speed,
+            run_id=self.run_id,
+            llm=getattr(self.llm, "name", type(self.llm).__name__),
+            stop_reason=stop_reason,
+            seconds=seconds,
+            tokens=self.tokens,
+            cost=self.cost,
+            timings=self.timings,
+            error=error,
         )
+        self._emit(
+            "run_end",
+            steps,
+            stop_reason=stop_reason,
+            steps=steps,
+            seconds=seconds,
+            usage=self.tokens.to_dict(),
+            cost=res.cost,
+            answer=answer,
+            changed_params=res.diff.changed_params,
+            error=error,
+        )
+        return res
 
 
 def _field(text: str, key: str) -> str | None:
+    import re
+
     m = re.findall(rf"^\s*\**{key}\**\s*:\s*(.+)$", text, re.M | re.I)
     return m[-1].strip() if m else None
 
