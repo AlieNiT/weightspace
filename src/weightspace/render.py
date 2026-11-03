@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import numpy as np
 
@@ -38,7 +39,7 @@ def parse_index(index: str | None):
     text = str(index).strip()
     if text.startswith("[") and text.endswith("]"):
         text = text[1:-1]
-    out = []
+    out: list[Any] = []
     for part in text.split(","):
         part = part.strip()
         if part in ("", ":", "..."):
@@ -121,7 +122,8 @@ _NUM = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 def parse_weights(text: str) -> dict[str, np.ndarray]:
     """Parse `### name [shape]` blocks of numbers (row labels like [0,1] are ignored)."""
     out: dict[str, np.ndarray] = {}
-    name, shape, nums = None, None, []
+    name, shape = None, None
+    nums: list[float] = []
 
     def done():
         if name is None:

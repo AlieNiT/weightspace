@@ -46,7 +46,8 @@ _JSON_TYPES = {int: "integer", float: "number", str: "string", bool: "boolean", 
 
 
 def _schema_from_signature(fn) -> dict:
-    props, required = {}, []
+    props: dict[str, dict[str, Any]] = {}
+    required: list[str] = []
     for p in inspect.signature(fn).parameters.values():
         if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
             continue

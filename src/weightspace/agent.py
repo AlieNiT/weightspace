@@ -407,7 +407,7 @@ class Session:
         return self._result(messages, 1)
 
     def _result(self, messages, steps) -> Result:
-        answer, conf = self._answer
+        answer, conf = self._answer or ("", None)
         return Result(
             answer=answer,
             confidence=conf,
