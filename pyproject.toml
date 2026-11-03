@@ -9,6 +9,16 @@ description = "Weight-space programming: let an LLM read and write neural networ
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]
+keywords = ["llm", "interpretability", "model-editing", "weights", "pytorch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/leofmarciano/weightspace"
+Source = "https://github.com/leofmarciano/weightspace"
 
 [project.optional-dependencies]
 torch = ["torch>=2.1"]
@@ -20,6 +30,9 @@ dev = ["pytest>=8", "ruff>=0.5"]
 
 [project.scripts]
 weightspace = "weightspace.cli:main"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["runs", "experiments"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/weightspace"]
