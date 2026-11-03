@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- Faster hot paths, measured with the new `benchmarks/profile_hotpaths.py`: block-parallel `diff`, `patch`, snapshots and restores; exact histogram-based quantiles; sparse checkpoints; content-keyed `describe` cache; cheaper spectrum for large matrices. `describe` on a 151936 x 1024 embedding goes from 6.5 s and 2.4 GB to 1.2 s and 132 MB, and a 30-step agent loop from 9.2 s to 0.4 s. See docs/production.md.
+
+### Fixed
+- `apply_patch` silently did nothing on tensors stored as non-contiguous arrays.
+- `diff` and `patch` counted untouched NaN weights as edits.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added

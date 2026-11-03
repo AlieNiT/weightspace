@@ -139,9 +139,9 @@ def test_replay_from_transcript(tmp_path):
 
 
 def test_chunked_diff_matches_reference(monkeypatch):
-    import weightspace.space as space
+    import weightspace._chunks as chunks
 
-    monkeypatch.setattr(space, "CHUNK", 7)
+    monkeypatch.setattr(chunks, "CHUNK", 7)
     ws = wsp.WeightSpace.from_numpy({"m": np.arange(100, dtype=np.float32).reshape(10, 10)})
     ws.edit("m")[2, 3:9] += 0.5
     ws.edit("m")[9, 9] = -1
