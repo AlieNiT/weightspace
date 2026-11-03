@@ -106,3 +106,70 @@ class OpenAIChat(LLM):
             calls.append(ToolCall(t.id, t.function.name, args))
         usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
         return LLMResponse(text=msg.content, tool_calls=calls, usage=usage, raw=r)
+
+
+def to_responses_input(messages: list[dict]) -> tuple[str | None, list[dict]]:
+    instructions, items = [], []
+    for m in messages:
+        if m["role"] == "system":
+            instructions.append(m["content"])
+        elif m["role"] == "assistant":
+            if m.get("openai_output"):
+                items.extend(m["openai_output"])
+                continue
+            if m.get("content"):
+                items.append({"type": "message", "role": "assistant", "content": m["content"]})
+            for t in m.get("tool_calls") or []:
+                items.append(
+                    {"type": "function_call", "call_id": t["id"], "name": t["name"], "arguments": json.dumps(t["arguments"])}
+                )
+        elif m["role"] == "tool":
+            items.append({"type": "function_call_output", "call_id": m["tool_call_id"], "output": m["content"]})
+        else:
+            items.append({"type": "message", "role": m["role"], "content": m["content"]})
+    return ("\n\n".join(instructions) or None), items
+
+
+class OpenResponses(OpenAIChat):
+    """Open Responses (https://www.openresponses.org), the open spec based on the OpenAI Responses API.
+
+    Works with OpenAI and any compliant server via `base_url`. Needed by models that only allow
+    reasoning together with tools there (e.g. gpt-6). Runs stateless (`store=False`) and replays
+    encrypted reasoning items between turns.
+    """
+
+    def __init__(self, model: str, **kw):
+        kw.setdefault("thinking_style", "reasoning_effort")
+        super().__init__(model, **kw)
+        self.name = f"openresponses:{model}"
+
+    def complete(self, messages, tools=None):
+        instructions, items = to_responses_input(messages)
+        kw = {"store": False, "include": ["reasoning.encrypted_content"], **self.params}
+        t = normalize_thinking(self.thinking)
+        if t is not None and self.thinking_style is not None:
+            kw["reasoning"] = {"effort": self.off_effort if t == "off" else t}
+        if instructions:
+            kw["instructions"] = instructions
+        if tools:
+            kw["tools"] = [
+                {"type": "function", "name": t["name"], "description": t["description"], "parameters": t["parameters"]}
+                for t in tools
+            ]
+        r = self.client.responses.create(model=self.model, input=items, **kw)
+        output = [o.model_dump(exclude_none=True) if hasattr(o, "model_dump") else dict(o) for o in r.output]
+        texts, calls = [], []
+        for o in output:
+            if o.get("type") == "message":
+                texts += [c.get("text", "") for c in o.get("content", []) if c.get("type") == "output_text"]
+            elif o.get("type") == "function_call":
+                try:
+                    args = json.loads(o.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    args = {"_raw": o.get("arguments")}
+                calls.append(ToolCall(o["call_id"], o["name"], args))
+        usage = r.usage.model_dump() if getattr(r, "usage", None) is not None else {}
+        return LLMResponse(text="\n".join(texts) or None, tool_calls=calls, usage=usage, raw=r, extra={"openai_output": output})
+
+
+OpenAIResponses = OpenResponses

@@ -5,7 +5,7 @@ from .mock import ScriptedLLM, call, reply
 
 
 def get_llm(spec: str | LLM, **kw) -> LLM:
-    """`"openai:gpt-5"`, `"anthropic:claude-sonnet-4-5"`, or `"openrouter:<model>"`."""
+    """`"openai:gpt-5"`, `"openresponses:gpt-6-astra"`, `"anthropic:claude-sonnet-4-5"`, or `"openrouter:<model>"`."""
     if isinstance(spec, LLM):
         return spec
     provider, _, model = spec.partition(":")
@@ -25,6 +25,10 @@ def get_llm(spec: str | LLM, **kw) -> LLM:
         kw.setdefault("api_key", os.environ.get("OPENROUTER_API_KEY"))
         kw.setdefault("thinking_style", "openrouter")
         return OpenAIChat(model, **kw)
+    if provider in ("openresponses", "openai-responses"):
+        from .openai import OpenResponses
+
+        return OpenResponses(model, **kw)
     if provider == "openai":
         from .openai import OpenAIChat
 

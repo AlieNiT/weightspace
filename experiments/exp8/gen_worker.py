@@ -17,6 +17,7 @@ def main(ckpt, inp, out):
         max_model_len=max_tokens + 2048,
         seed=0,
         enable_prefix_caching=True,
+        max_num_seqs=256,
         limit_mm_per_prompt={"image": 0, "video": 0},
     )
     prompts, params, keys = [], [], []
