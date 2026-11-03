@@ -8,7 +8,7 @@ A replication of the paper's Experiment 8 with `weightspace`: an LLM edits the w
 - `table.py`: renders the result JSONs of an eval dir as a Markdown table.
 - `common.py`, `gen_worker.py`: prompts, grading, loop detection, checkpoint building and the vLLM worker.
 
-Needs one GPU (tested on an H100 80GB with vLLM 0.33), `pip install vllm datasets`, and the practice sets from [lm_understand-logs](https://github.com/RikiyaT/lm_understand-logs) as JSONL in `--practice` (`gsm8k_train.jsonl`, `math_train.jsonl`, `aime.jsonl`).
+Needs one GPU (tested on an H100 80GB with vLLM 0.33), `pip install vllm datasets math-verify`, and the practice sets from [lm_understand-logs](https://github.com/RikiyaT/lm_understand-logs) as JSONL in `--practice` (`gsm8k_train.jsonl`, `math_train.jsonl`, `aime.jsonl`).
 
 ```bash
 python run_edit.py --llm anthropic:claude-opus-5-5 --budget 12 --work runs/opus
