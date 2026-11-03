@@ -58,14 +58,27 @@ def normalize_thinking(value) -> str | None:
     return v
 
 
+def normalize_speed(value) -> str | None:
+    """None = provider default; True/"fast" = fast mode; False/"standard"; other tiers pass through (e.g. "ultrafast")."""
+    if value is None:
+        return None
+    if value is True:
+        return "fast"
+    if value is False:
+        return "standard"
+    return str(value).lower()
+
+
 class LLM:
     """Implement `complete` to plug in any provider.
 
-    `thinking` is set by `Session(thinking=...)`; backends map it to their own reasoning switch.
+    `thinking` and `speed` are set by `Session(thinking=..., speed=...)`; backends map them to their own
+    reasoning switch and fast-inference option.
     """
 
     name = "llm"
     thinking: str | None = None
+    speed: str | None = None
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
         raise NotImplementedError

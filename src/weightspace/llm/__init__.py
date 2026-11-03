@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .base import LLM, LLMResponse, ToolCall, normalize_thinking
+from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 from .mock import ScriptedLLM, call, reply
 
 
@@ -36,4 +36,4 @@ def get_llm(spec: str | LLM, **kw) -> LLM:
     raise ValueError(f"unknown provider {provider!r}")
 
 
-__all__ = ["normalize_thinking", "LLM", "LLMResponse", "ToolCall", "ScriptedLLM", "call", "reply", "get_llm"]
+__all__ = ["normalize_thinking", "normalize_speed", "LLM", "LLMResponse", "ToolCall", "ScriptedLLM", "call", "reply", "get_llm"]
