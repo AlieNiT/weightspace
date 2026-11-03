@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weightspace"
-version = "0.2.0"
+version = "0.3.0"
 description = "Weight-space programming: let an LLM read and write neural network weights directly."
 readme = "README.md"
 requires-python = ">=3.10"

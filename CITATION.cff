@@ -8,7 +8,7 @@ authors:
 license: Apache-2.0
 repository-code: "https://github.com/leofmarciano/weightspace"
 date-released: "2026-11-03"
-version: "0.1.0"
+version: "0.3.0"
 keywords:
   - weight-space-programming
   - interpretability

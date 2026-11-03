@@ -16,7 +16,7 @@ from .space import DiffSummary, NumpyStore, Store, WeightSpace
 from .tasks import as_weightspace, fix, improve, read, write
 from .usage import Pricing, Usage
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "WeightSpace",
