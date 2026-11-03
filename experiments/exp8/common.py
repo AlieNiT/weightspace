@@ -13,13 +13,15 @@ import numpy as np
 
 INSTRUCTION = "Please reason step by step, and put your final answer within \\boxed{}."
 SAMPLING = {"temperature": 0.6, "top_p": 0.95, "top_k": 20, "presence_penalty": 1.5}
+# non-thinking mode settings from the Qwen3.5-0.8B model card
+SAMPLING_NO_THINKING = {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "presence_penalty": 1.5}
 FROZEN = ("model.language_model.norm.weight", "model.language_model.embed_tokens.weight", "lm_head.weight")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def chat_prompt(tok, problem: str) -> str:
+def chat_prompt(tok, problem: str, thinking: bool = True) -> str:
     msgs = [{"role": "user", "content": problem + "\n" + INSTRUCTION}]
-    return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=True)
+    return tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True, enable_thinking=thinking)
 
 
 def last_boxed(text: str) -> str | None:
@@ -101,10 +103,13 @@ def build_ckpt(base_dir: str, out_dir: str, edits: dict[str, np.ndarray]) -> str
     return out_dir
 
 
-def generate(ckpt: str, items: list[dict], *, n: int, max_tokens: int, out: str, gpu_mem: float = 0.85):
+def generate(
+    ckpt: str, items: list[dict], *, n: int, max_tokens: int, out: str, gpu_mem: float = 0.85, sampling: dict | None = None
+):
     """Run gen_worker.py in a fresh process (vLLM). items: {id, prompt}. Returns the rows written to `out`."""
     inp = out + ".in.json"
-    json.dump({"items": items, "n": n, "max_tokens": max_tokens, "gpu_mem": gpu_mem}, open(inp, "w"))
+    job = {"items": items, "n": n, "max_tokens": max_tokens, "gpu_mem": gpu_mem, "sampling": sampling or SAMPLING}
+    json.dump(job, open(inp, "w"))
     return subprocess.Popen([sys.executable, os.path.join(HERE, "gen_worker.py"), ckpt, inp, out])
 
 
