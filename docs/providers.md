@@ -24,6 +24,17 @@ For vLLM, SGLang, Ollama or any OpenAI-compatible server, use `OpenAIChat(model,
 - vLLM / SGLang chat templates: `OpenAIChat(..., thinking_style="chat_template")` sends `enable_thinking`.
 - Anthropic: adaptive thinking with `output_config.effort`, falling back to a token budget on models that don't support it. Prompt caching is on by default (`AnthropicChat(..., cache=False)` to turn it off).
 
+## Fast mode
+
+Extra keyword arguments go straight to the provider request, so fast inference is one argument away. It runs the same model faster at a higher price:
+
+```python
+llm = wsp.get_llm("anthropic:claude-opus-5-5", speed="fast")  # ~2x price
+llm = wsp.get_llm("openresponses:gpt-6-astra", service_tier="fast")  # ~2x price
+```
+
+The Exp. 8 script takes `--speed fast`.
+
 ## Custom LLMs
 
 Subclass `weightspace.llm.LLM` and implement `complete(messages, tools) -> LLMResponse`. `wsp.ScriptedLLM([...])` replays a fixed script for offline tests.
