@@ -80,7 +80,7 @@ def main():
     ap.add_argument("--thinking", default="high")
     ap.add_argument("--work", default="/root/exp/work")
     ap.add_argument("--practice", default="/root/exp/practice")
-    ap.add_argument("--speed", choices=["fast"], help="provider fast mode: Anthropic `speed`, OpenAI `service_tier`")
+    ap.add_argument("--speed", choices=["fast"], help="speed of the editing LLM (provider fast mode)")
     ap.add_argument("--gpu-mem", type=float, default=0.8, help="vLLM memory share per probe call (split in two for paired runs)")
     a = ap.parse_args()
     work = a.work
@@ -309,13 +309,9 @@ def main():
         "read_gen": read_gen,
         "read_tf": read_tf,
     }
-    llm = a.llm
-    if a.speed:
-        key = "speed" if a.llm.startswith("anthropic") else "service_tier"
-        llm = wsp.get_llm(a.llm, **{key: a.speed})
     s = wsp.Session(
         ws,
-        llm,
+        a.llm,
         mode="improve",
         probes=[generate_, teacher_forced],
         forward_budget=a.budget,
@@ -324,6 +320,7 @@ def main():
         max_tool_chars=8000,
         sandbox_timeout=900,
         thinking=a.thinking,
+        speed=a.speed,
         log_path=f"{work}/transcript.jsonl",
         verbose=True,
     )

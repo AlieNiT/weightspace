@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from . import prompts
-from .llm import LLM, get_llm, normalize_thinking
+from .llm import LLM, get_llm, normalize_speed, normalize_thinking
 from .probes import Probe
 from .render import describe, extract_blocks, fmt_array, parse_index, parse_weights, render_space
 from .sandbox import Sandbox
@@ -65,6 +65,7 @@ class Result:
     transcript: list[dict]
     usage: dict
     ws: WeightSpace = field(repr=False)
+    speed: str | None = None
 
     @property
     def forward_used(self) -> int:
@@ -73,6 +74,7 @@ class Result:
     def __str__(self) -> str:
         conf = f" (confidence {self.confidence:.2f})" if self.confidence is not None else ""
         think = f" thinking={self.thinking}" if self.thinking else ""
+        think += f" speed={self.speed}" if self.speed else ""
         return (
             f"[{self.mode}] {self.answer}{conf}\n"
             f"steps={self.steps}{think} forward passes={self.forward_used}/{self.forward_budget}\n{self.diff}"
@@ -86,6 +88,7 @@ class Result:
         summary = {
             "mode": self.mode,
             "thinking": self.thinking,
+            "speed": self.speed,
             "answer": self.answer,
             "confidence": self.confidence,
             "steps": self.steps,
@@ -116,6 +119,8 @@ class Session:
     python:         give the LLM a persistent Python sandbox over the weights
     thinking:       reasoning of the editing LLM: None = provider default, False/"off" = no thinking
                     (provider reasoning disabled and the LLM told to act directly), True or "low"/"medium"/"high"
+    speed:          inference speed of the editing LLM: None = provider default, "fast" (or True) = fast mode
+                    (same model, faster output, higher price), "standard", or a provider tier like "ultrafast"
     """
 
     def __init__(
@@ -136,6 +141,7 @@ class Session:
         sandbox_timeout: float | None = 300,
         system_prompt: str | None = None,
         thinking: bool | str | None = None,
+        speed: bool | str | None = None,
         log_path: str | None = None,
         verbose: bool = False,
     ):
@@ -153,6 +159,9 @@ class Session:
         self.thinking = normalize_thinking(thinking)
         if self.thinking is not None:
             self.llm.thinking = self.thinking
+        self.speed = normalize_speed(speed)
+        if self.speed is not None:
+            self.llm.speed = self.speed
         self.system_prompt = system_prompt or prompts.SYSTEM
         if self.thinking == "off":
             self.system_prompt += prompts.NO_THINKING
@@ -420,6 +429,7 @@ class Session:
             transcript=messages,
             usage=self.usage,
             ws=self.ws,
+            speed=self.speed,
         )
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from .base import LLM, LLMResponse, ToolCall, normalize_thinking
+from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 
 THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384, "xhigh": 24576, "max": 32000}
 
@@ -59,6 +59,7 @@ class AnthropicChat(LLM):
         client=None,
         thinking=None,
         thinking_style: str = "auto",
+        speed=None,
         cache: bool = True,
         **params,
     ):
@@ -72,6 +73,7 @@ class AnthropicChat(LLM):
         self.max_tokens = max_tokens
         self.params = params
         self.thinking = normalize_thinking(thinking)
+        self.speed = normalize_speed(speed)
         if thinking_style not in ("auto", "adaptive", "budget"):
             raise ValueError("thinking_style must be 'auto', 'adaptive' or 'budget'")
         self.thinking_style = thinking_style
@@ -94,6 +96,8 @@ class AnthropicChat(LLM):
             # prompt caching: everything up to the newest block is reused on the next step
             msgs[-1]["content"][-1] = {**msgs[-1]["content"][-1], "cache_control": {"type": "ephemeral"}}
         kw = dict(self.params)
+        if self.speed:
+            kw["speed"] = self.speed
         if system:
             kw["system"] = system
         if tools:

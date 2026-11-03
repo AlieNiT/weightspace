@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 
-from .base import LLM, LLMResponse, ToolCall, normalize_thinking
+from .base import LLM, LLMResponse, ToolCall, normalize_speed, normalize_thinking
 
 
 def to_openai_messages(messages: list[dict]) -> list[dict]:
@@ -43,6 +43,8 @@ class OpenAIChat(LLM):
       "openrouter"        OpenRouter's unified `reasoning` field
       "chat_template"     vLLM / SGLang hybrid models (Qwen3...): `chat_template_kwargs.enable_thinking`
       None                never send anything
+
+    speed is sent as `service_tier` ("fast", "ultrafast", ...; "standard" maps to OpenAI's "default").
     """
 
     def __init__(
@@ -55,6 +57,7 @@ class OpenAIChat(LLM):
         thinking=None,
         thinking_style: str | None = "reasoning_effort",
         off_effort: str = "none",
+        speed=None,
         **params,
     ):
         if client is None:
@@ -71,6 +74,11 @@ class OpenAIChat(LLM):
         self.thinking = normalize_thinking(thinking)
         self.thinking_style = thinking_style
         self.off_effort = off_effort
+        self.speed = normalize_speed(speed)
+
+    def _speed_params(self, kw: dict) -> None:
+        if self.speed:
+            kw["service_tier"] = "default" if self.speed == "standard" else self.speed
 
     def _thinking_params(self, kw: dict) -> None:
         t, style = normalize_thinking(self.thinking), self.thinking_style
@@ -93,6 +101,7 @@ class OpenAIChat(LLM):
     def complete(self, messages, tools=None):
         kw = dict(self.params)
         self._thinking_params(kw)
+        self._speed_params(kw)
         if tools:
             kw["tools"] = to_openai_tools(tools)
         r = self.client.chat.completions.create(model=self.model, messages=to_openai_messages(messages), **kw)
@@ -149,6 +158,7 @@ class OpenResponses(OpenAIChat):
         t = normalize_thinking(self.thinking)
         if t is not None and self.thinking_style is not None:
             kw["reasoning"] = {"effort": self.off_effort if t == "off" else t}
+        self._speed_params(kw)
         if instructions:
             kw["instructions"] = instructions
         if tools:

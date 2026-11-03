@@ -98,6 +98,8 @@ With thinking off, the provider's reasoning is disabled and the LLM is told to g
 
 CLI: `--no-thinking` or `--thinking low|medium|high|xhigh|max`. The setting is saved in `result.json`, so you can compare runs with and without thinking.
 
+`speed="fast"` (CLI `--fast`) turns on the provider's fast mode for the editing LLM: same model, faster output, higher price. See [providers](docs/providers.md#fast-mode).
+
 ## Probes
 
 A probe is any function. It runs after the current weights are synced into the model, and whatever it returns is what the LLM sees. Its arguments become the tool's schema.

@@ -26,14 +26,14 @@ For vLLM, SGLang, Ollama or any OpenAI-compatible server, use `OpenAIChat(model,
 
 ## Fast mode
 
-Extra keyword arguments go straight to the provider request, so fast inference is one argument away. It runs the same model faster at a higher price:
+`speed="fast"` (CLI `--fast`) runs the same editing model with faster inference at a higher price. `None` keeps the provider's standard speed. The value is saved in `result.json`.
+
+- Anthropic: `speed="fast"` on the request, up to 2.5x faster output on Opus 5.5 for about 2x the price.
+- OpenAI / Open Responses: sent as `service_tier`. `"fast"` costs about 2x; `speed="ultrafast"` also passes through for models that support it.
 
 ```python
-llm = wsp.get_llm("anthropic:claude-opus-5-5", speed="fast")  # ~2x price
-llm = wsp.get_llm("openresponses:gpt-6-astra", service_tier="fast")  # ~2x price
+wsp.improve(model, "...", llm="anthropic:claude-opus-5-5", speed="fast")
 ```
-
-The Exp. 8 script takes `--speed fast`.
 
 ## Custom LLMs
 

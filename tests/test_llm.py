@@ -98,6 +98,12 @@ def test_openai_thinking_styles():
     assert "reasoning_effort" not in _capture_openai(thinking="off", thinking_style=None)
 
 
+def test_openai_speed():
+    assert "service_tier" not in _capture_openai()
+    assert _capture_openai(speed="fast")["service_tier"] == "fast"
+    assert _capture_openai(speed=False)["service_tier"] == "default"
+
+
 def test_anthropic_thinking():
     from anthropic.types import Message
 
@@ -123,7 +129,10 @@ def test_anthropic_thinking():
 
     llm = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create)), max_tokens=4000)
     llm.complete([{"role": "user", "content": "hi"}])
-    assert "thinking" not in seen
+    assert "thinking" not in seen and "speed" not in seen
+    llm.speed = "fast"
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert seen["speed"] == "fast"
     llm.thinking = "off"
     llm.complete([{"role": "user", "content": "hi"}])
     assert seen["thinking"] == {"type": "disabled"}
