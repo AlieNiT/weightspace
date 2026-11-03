@@ -31,6 +31,8 @@ def main(argv=None) -> int:
             "--thinking", choices=["off", "low", "medium", "high", "xhigh", "max"], help="reasoning of the editing LLM"
         )
         b.add_argument("--no-thinking", dest="thinking", action="store_const", const="off", help="same as --thinking off")
+        b.add_argument("--speed", help='inference speed of the editing LLM, e.g. "fast" (provider fast mode)')
+        b.add_argument("--fast", dest="speed", action="store_const", const="fast", help="same as --speed fast")
         b.add_argument("--out", help="directory for transcript, result.json, patch.npz")
         b.add_argument("--save-weights", help="write edited weights to .safetensors/.npz")
         b.add_argument("-v", "--verbose", action="store_true")
@@ -58,6 +60,7 @@ def main(argv=None) -> int:
         context=context,
         max_steps=args.max_steps,
         thinking=args.thinking,
+        speed=args.speed,
         verbose=args.verbose,
     )
     res = s.run_text(args.task) if args.text_mode else s.run(args.task)

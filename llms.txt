@@ -15,6 +15,7 @@ Things to know:
 
 - `llm` is a `provider:model` string (`openai:`, `openresponses:`, `openrouter:`, `anthropic:`) or an `LLM` instance. Use `openresponses:` (Open Responses / OpenAI Responses API) for models that need reasoning together with tools, such as gpt-6 models.
 - `thinking=False` (CLI `--no-thinking`) makes the editing LLM act with no reasoning; `"low"`...`"max"` set the level; `None` keeps the provider default.
+- `speed="fast"` (CLI `--fast`) uses the provider's fast mode (Anthropic `speed`, OpenAI `service_tier`): same model, faster, about 2x the price.
 - The LLM never gets the model object. It sees tensors through tools (list, describe, read slices, write) and a Python sandbox with `R` (read-only) and `W` (writable) dicts of numpy arrays, plus checkpoint / restore / revert.
 - The only way it can run the network is through probes: functions decorated with `@wsp.probe(cost=1)` whose docstring and arguments become the tool schema. `forward_budget` caps the total cost.
 - Lower level: `wsp.WeightSpace.from_torch / from_hf / from_file / from_numpy`, `ws.diff()`, `ws.save_patch()`, `ws.apply_patch()`, and `wsp.Session(ws, llm, mode=..., probes=..., namespace=..., max_steps=...).run(task)`.
