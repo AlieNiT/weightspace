@@ -60,6 +60,25 @@ wsp.write(model, "Play Breakout: move the paddle under the ball.", llm=..., cont
 wsp.improve(hf_model, "Stop the reasoning loops.", llm=..., probes=[generate], forward_budget=25)
 ```
 
+## Thinking on or off
+
+`thinking` sets how much the editing LLM reasons before it acts. Use `thinking=False` to have it edit the weights with no thinking at all:
+
+```python
+wsp.fix(model, "...", llm="openai:gpt-5.1", thinking=False)  # or "low" / "medium" / "high"; None = provider default
+```
+
+With thinking off, the provider's reasoning is disabled and the LLM is told to go straight to tool calls and edits. How that reaches each provider:
+
+| Backend | off | on |
+|---|---|---|
+| OpenAI | `reasoning_effort="none"` (`OpenAIChat(..., off_effort="minimal")` for gpt-5) | `reasoning_effort=<level>` |
+| OpenRouter | `reasoning.enabled=false` | `reasoning.effort=<level>` |
+| vLLM / SGLang (Qwen3 etc.) | `OpenAIChat(..., thinking_style="chat_template")` → `enable_thinking=false` | `enable_thinking=true` |
+| Anthropic | `thinking.type="disabled"` | extended thinking with a 2k / 8k / 16k token budget |
+
+CLI: `--no-thinking` or `--thinking low|medium|high`. The setting is saved in `result.json`, so you can compare runs with and without thinking.
+
 ## Probes
 
 A probe is any function. It runs after the current weights are synced into the model, and whatever it returns is what the LLM sees. Its arguments become the tool's schema.

@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from . import prompts
-from .llm import LLM, get_llm
+from .llm import LLM, get_llm, normalize_thinking
 from .probes import Probe
 from .render import describe, extract_blocks, fmt_array, parse_index, parse_weights, render_space
 from .sandbox import Sandbox
@@ -57,6 +57,7 @@ class Result:
     answer: str
     confidence: float | None
     mode: str
+    thinking: str | None
     diff: DiffSummary
     forward_calls: list[ForwardCall]
     forward_budget: int
@@ -71,9 +72,10 @@ class Result:
 
     def __str__(self) -> str:
         conf = f" (confidence {self.confidence:.2f})" if self.confidence is not None else ""
+        think = f" thinking={self.thinking}" if self.thinking else ""
         return (
             f"[{self.mode}] {self.answer}{conf}\n"
-            f"steps={self.steps} forward passes={self.forward_used}/{self.forward_budget}\n{self.diff}"
+            f"steps={self.steps}{think} forward passes={self.forward_used}/{self.forward_budget}\n{self.diff}"
         )
 
     def save(self, directory: str) -> None:
@@ -83,6 +85,7 @@ class Result:
                 f.write(json.dumps(m, default=str) + "\n")
         summary = {
             "mode": self.mode,
+            "thinking": self.thinking,
             "answer": self.answer,
             "confidence": self.confidence,
             "steps": self.steps,
@@ -111,6 +114,8 @@ class Session:
     probes:         forward passes the LLM may spend (see `Probe`); each call costs `probe.cost`
     forward_budget: total forward-pass budget across probes
     python:         give the LLM a persistent Python sandbox over the weights
+    thinking:       reasoning of the editing LLM: None = provider default, False/"off" = no thinking
+                    (provider reasoning disabled and the LLM told to act directly), True or "low"/"medium"/"high"
     """
 
     def __init__(
@@ -130,6 +135,7 @@ class Session:
         read_limit: int = 4096,
         sandbox_timeout: float | None = 300,
         system_prompt: str | None = None,
+        thinking: bool | str | None = None,
         log_path: str | None = None,
         verbose: bool = False,
     ):
@@ -144,7 +150,12 @@ class Session:
         self.max_steps = max_steps
         self.max_tool_chars = max_tool_chars
         self.read_limit = read_limit
+        self.thinking = normalize_thinking(thinking)
+        if self.thinking is not None:
+            self.llm.thinking = self.thinking
         self.system_prompt = system_prompt or prompts.SYSTEM
+        if self.thinking == "off":
+            self.system_prompt += prompts.NO_THINKING
         self.log_path = log_path
         self.verbose = verbose
         self.forward_calls: list[ForwardCall] = []
@@ -401,6 +412,7 @@ class Session:
             answer=answer,
             confidence=conf,
             mode=self.mode,
+            thinking=self.thinking,
             diff=self.ws.diff(),
             forward_calls=self.forward_calls,
             forward_budget=self.forward_budget,

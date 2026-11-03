@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 
-from .base import LLM, LLMResponse, ToolCall
+from .base import LLM, LLMResponse, ToolCall, normalize_thinking
+
+THINKING_BUDGET = {"low": 2048, "medium": 8192, "high": 16384}
 
 
 def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
@@ -39,7 +41,7 @@ def to_anthropic(messages: list[dict]) -> tuple[str, list[dict]]:
 
 
 class AnthropicChat(LLM):
-    def __init__(self, model: str, *, api_key: str | None = None, max_tokens: int = 16000, client=None, **params):
+    def __init__(self, model: str, *, api_key: str | None = None, max_tokens: int = 16000, client=None, thinking=None, **params):
         if client is None:
             from anthropic import Anthropic
 
@@ -49,15 +51,24 @@ class AnthropicChat(LLM):
         self.name = f"anthropic:{model}"
         self.max_tokens = max_tokens
         self.params = params
+        self.thinking = normalize_thinking(thinking)
 
     def complete(self, messages, tools=None):
         system, msgs = to_anthropic(messages)
         kw = dict(self.params)
+        max_tokens = self.max_tokens
+        t = normalize_thinking(self.thinking)
+        if t == "off":
+            kw["thinking"] = {"type": "disabled"}
+        elif t is not None:
+            budget = THINKING_BUDGET[t]
+            kw["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            max_tokens = max(max_tokens, budget + 4096)
         if system:
             kw["system"] = system
         if tools:
             kw["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools]
-        r = self.client.messages.create(model=self.model, max_tokens=self.max_tokens, messages=msgs, **kw)
+        r = self.client.messages.create(model=self.model, max_tokens=max_tokens, messages=msgs, **kw)
         text, calls, blocks = [], [], []
         for b in r.content:
             blocks.append(b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else dict(b))

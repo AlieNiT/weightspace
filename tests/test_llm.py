@@ -72,3 +72,61 @@ def test_anthropic_parses_real_sdk_types():
     assert out.tool_calls[0].arguments == {"name": "w"}
     replay = to_anthropic([{"role": "user", "content": "hi"}, out.to_message()])[1][1]["content"]
     assert replay[1]["type"] == "tool_use" and replay[1]["input"] == {"name": "w"}
+
+
+def _capture_openai(**kw):
+    captured = {}
+    resp = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))], usage=None)
+
+    def create(**k):
+        captured.update(k)
+        return resp
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    OpenAIChat("m", client=client, **kw).complete([{"role": "user", "content": "hi"}])
+    return captured
+
+
+def test_openai_thinking_styles():
+    assert "reasoning_effort" not in _capture_openai()
+    assert _capture_openai(thinking=False)["reasoning_effort"] == "none"
+    assert _capture_openai(thinking=False, off_effort="minimal")["reasoning_effort"] == "minimal"
+    assert _capture_openai(thinking="high")["reasoning_effort"] == "high"
+    assert _capture_openai(thinking="off", thinking_style="openrouter")["extra_body"] == {"reasoning": {"enabled": False}}
+    c = _capture_openai(thinking="off", thinking_style="chat_template", extra_body={"top_k": 20})
+    assert c["extra_body"] == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
+    assert "reasoning_effort" not in _capture_openai(thinking="off", thinking_style=None)
+
+
+def test_anthropic_thinking():
+    from anthropic.types import Message
+
+    from weightspace.llm.anthropic import AnthropicChat
+
+    msg = Message.model_validate(
+        {
+            "id": "m",
+            "type": "message",
+            "role": "assistant",
+            "model": "x",
+            "stop_reason": "end_turn",
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+    )
+    seen = {}
+
+    def create(**kw):
+        seen.clear()
+        seen.update(kw)
+        return msg
+
+    llm = AnthropicChat("x", client=SimpleNamespace(messages=SimpleNamespace(create=create)), max_tokens=4000)
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert "thinking" not in seen
+    llm.thinking = "off"
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert seen["thinking"] == {"type": "disabled"}
+    llm.thinking = "high"
+    llm.complete([{"role": "user", "content": "hi"}])
+    assert seen["thinking"]["budget_tokens"] == 16384 and seen["max_tokens"] > 16384

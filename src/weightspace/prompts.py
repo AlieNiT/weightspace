@@ -28,6 +28,11 @@ MODES = {
     ),
 }
 
+NO_THINKING = """
+Thinking is off for this run: do not write out step-by-step reasoning. Go straight to tool calls and weight
+edits, with at most one short sentence of explanation each.
+"""
+
 TEXT_MODE_EDIT = """Reply with your reasoning and then the edit, in ONE of these formats:
 1. A ```python block. It runs once with `W` (writable dict of numpy arrays, edit in place or assign),
    `R` (read-only originals) and `np` in scope.

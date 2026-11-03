@@ -27,6 +27,8 @@ def main(argv=None) -> int:
         b.add_argument("--context", default="", help="text or @file with architecture/environment notes")
         b.add_argument("--text-mode", action="store_true", help="put all weights in the prompt, no tools")
         b.add_argument("--max-steps", type=int, default=60)
+        b.add_argument("--thinking", choices=["off", "low", "medium", "high"], help="reasoning of the editing LLM")
+        b.add_argument("--no-thinking", dest="thinking", action="store_const", const="off", help="same as --thinking off")
         b.add_argument("--out", help="directory for transcript, result.json, patch.npz")
         b.add_argument("--save-weights", help="write edited weights to .safetensors/.npz")
         b.add_argument("-v", "--verbose", action="store_true")
@@ -47,7 +49,15 @@ def main(argv=None) -> int:
     if args.cmd == "write":
         ws.zero_()
         ws.commit()
-    s = Session(ws, args.llm, mode=args.cmd, context=context, max_steps=args.max_steps, verbose=args.verbose)
+    s = Session(
+        ws,
+        args.llm,
+        mode=args.cmd,
+        context=context,
+        max_steps=args.max_steps,
+        thinking=args.thinking,
+        verbose=args.verbose,
+    )
     res = s.run_text(args.task) if args.text_mode else s.run(args.task)
     print(res)
     if args.out:

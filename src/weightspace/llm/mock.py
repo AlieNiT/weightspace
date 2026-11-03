@@ -27,9 +27,11 @@ class ScriptedLLM(LLM):
     def __init__(self, steps: list[LLMResponse | Callable[[list[dict], list[dict]], LLMResponse]]):
         self.steps = list(steps)
         self.seen: list[list[dict]] = []
+        self.thinking_seen: list[str | None] = []
 
     def complete(self, messages, tools=None):
         self.seen.append([dict(m) for m in messages])
+        self.thinking_seen.append(self.thinking)
         if not self.steps:
             return reply("(script exhausted)")
         step = self.steps.pop(0)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .base import LLM, LLMResponse, ToolCall
+from .base import LLM, LLMResponse, ToolCall, normalize_thinking
 from .mock import ScriptedLLM, call, reply
 
 
@@ -23,6 +23,7 @@ def get_llm(spec: str | LLM, **kw) -> LLM:
 
         kw.setdefault("base_url", "https://openrouter.ai/api/v1")
         kw.setdefault("api_key", os.environ.get("OPENROUTER_API_KEY"))
+        kw.setdefault("thinking_style", "openrouter")
         return OpenAIChat(model, **kw)
     if provider == "openai":
         from .openai import OpenAIChat
@@ -31,4 +32,4 @@ def get_llm(spec: str | LLM, **kw) -> LLM:
     raise ValueError(f"unknown provider {provider!r}")
 
 
-__all__ = ["LLM", "LLMResponse", "ToolCall", "ScriptedLLM", "call", "reply", "get_llm"]
+__all__ = ["normalize_thinking", "LLM", "LLMResponse", "ToolCall", "ScriptedLLM", "call", "reply", "get_llm"]

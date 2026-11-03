@@ -37,10 +37,35 @@ class LLMResponse:
         return msg
 
 
+THINKING_LEVELS = ("off", "low", "medium", "high")
+
+
+def normalize_thinking(value) -> str | None:
+    """None = provider default; False/"off" = no reasoning; True = "medium"; or "low"/"medium"/"high"."""
+    if value is None:
+        return None
+    if value is False:
+        return "off"
+    if value is True:
+        return "medium"
+    v = str(value).lower()
+    if v in ("none", "disabled", "false", "no"):
+        return "off"
+    if v in ("on", "true", "enabled"):
+        return "medium"
+    if v not in THINKING_LEVELS:
+        raise ValueError(f"thinking must be None, a bool, or one of {THINKING_LEVELS}")
+    return v
+
+
 class LLM:
-    """Implement `complete` to plug in any provider."""
+    """Implement `complete` to plug in any provider.
+
+    `thinking` is set by `Session(thinking=...)`; backends map it to their own reasoning switch.
+    """
 
     name = "llm"
+    thinking: str | None = None
 
     def complete(self, messages: list[dict], tools: list[dict] | None = None) -> LLMResponse:
         raise NotImplementedError

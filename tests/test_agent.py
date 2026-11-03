@@ -117,3 +117,20 @@ def test_text_mode_weights_block_and_python(arrays):
     np.testing.assert_array_equal(res.ws["a.bias"], [1, 2, 3, 4])
     assert np.all(res.ws["a.weight"][0] == 0)
     assert "### a.weight [4, 3]" in llm.seen[0][1]["content"]
+
+
+def test_thinking_off_reaches_llm_and_prompt(arrays):
+    llm = ScriptedLLM([reply(None, call("submit", answer="ok"))])
+    res = wsp.fix(dict(arrays), "fix", llm, thinking=False)
+    assert llm.thinking_seen == ["off"]
+    assert "Thinking is off" in llm.seen[0][0]["content"]
+    assert res.thinking == "off"
+
+    llm = ScriptedLLM([reply("ANSWER: x")])
+    wsp.read(dict(arrays), "?", llm, text_mode=True, thinking="low")
+    assert llm.thinking_seen == ["low"]
+    assert "Thinking is off" not in llm.seen[0][0]["content"]
+
+    llm = ScriptedLLM([reply(None, call("submit", answer="ok"))])
+    wsp.read(dict(arrays), "?", llm)
+    assert llm.thinking_seen == [None]
