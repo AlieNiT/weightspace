@@ -66,7 +66,8 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     path = os.path.join(a.out, f"{a.label}.jsonl")
     t0 = time.time()
-    if generate(ckpt, items, n=a.samples, max_tokens=a.max_tokens, out=path, gpu_mem=a.gpu_mem).wait() != 0:
+    done = os.path.exists(path) and sum(1 for _ in open(path)) == len(items) * a.samples
+    if not done and generate(ckpt, items, n=a.samples, max_tokens=a.max_tokens, out=path, gpu_mem=a.gpu_mem).wait() != 0:
         raise SystemExit("generation failed")
     gen = grade_rows([json.loads(x) for x in open(path)], {r["id"]: r["answer"] for r in rows}, a.max_tokens)
     with open(path, "w") as f:
