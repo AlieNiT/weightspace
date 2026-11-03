@@ -148,7 +148,7 @@ def test_anthropic_thinking():
     assert len(calls) == 3
 
 
-def test_openai_responses_replays_items():
+def test_openresponses_replays_items():
     from weightspace.llm import get_llm
 
     sent = []
@@ -161,11 +161,13 @@ def test_openai_responses_replays_items():
         sent.append(kw)
         return SimpleNamespace(output=[SimpleNamespace(model_dump=lambda exclude_none, o=o: o) for o in out], usage=None)
 
-    llm = get_llm("openai-responses:m", client=SimpleNamespace(responses=SimpleNamespace(create=create)), thinking="high")
+    llm = get_llm("openresponses:m", client=SimpleNamespace(responses=SimpleNamespace(create=create)), thinking="high")
     msgs = [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}]
     r = llm.complete(msgs, tools=[{"name": "submit", "description": "d", "parameters": {"type": "object"}}])
     assert r.tool_calls[0].arguments == {"answer": "a"}
     assert sent[0]["instructions"] == "sys" and sent[0]["reasoning"] == {"effort": "high"} and sent[0]["store"] is False
     msgs += [r.to_message(), {"role": "tool", "tool_call_id": "c1", "name": "submit", "content": "ok"}]
     llm.complete(msgs)
+    assert sent[0]["input"] == [{"type": "message", "role": "user", "content": "go"}]
+    assert llm.name == "openresponses:m" and get_llm("openai-responses:m", client=llm.client).name == llm.name
     assert sent[1]["input"][1:] == out + [{"type": "function_call_output", "call_id": "c1", "output": "ok"}]
