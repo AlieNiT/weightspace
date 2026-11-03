@@ -169,6 +169,38 @@ weightspace fix model.safetensors "..." --llm openai:gpt-5 --probe probes.py:rol
 weightspace fix model.safetensors "..." --replay runs/1/transcript.jsonl   # no tokens spent
 ```
 
+## Results: Exp. 8 replication
+
+We reran the paper's Exp. 8 with this harness: fix Qwen3.5-0.8B's math by editing its weights, no training. Test sets are MATH-500 and GSM8K test, one sample per problem, last `\boxed{}` graded (code in [`experiments/exp8`](experiments/exp8)). ± is one standard error; "cut" is the share of answers that hit the token limit.
+
+**Thinking on** (paper protocol, 32k tokens, first 250 problems of each set):
+
+| Edit | Editing LLM | Forward passes | Weights changed | MATH-500 | cut | GSM8K | cut |
+|---|---|---|---|---|---|---|---|
+| none (base) | | | 0 | 8.4 ± 1.8 | 92% | 12.4 ± 2.1 | 89% |
+| paper's edit ([checkpoint](https://huggingface.co/RikiyaT/Qwen3.5-0.8B-weight-space-programming)) | gpt-6-astra | 50 | 131,072 | 52.4 ± 3.2 | 34% | 61.6 ± 3.1 | 10% |
+| 4 MLP neurons ×6 | Opus 5.5, thinking high | 7 of 12 | 4,096 | 40.0 ± 3.1 | 60% | 53.2 ± 3.2 | 42% |
+| 4 attention heads ×1.5 | Opus 5.5, thinking off, fast | 7 of 12 | 1,048,576 | 17.2 ± 2.4 | 82% | 34.0 ± 3.0 | 59% |
+| 1 MLP neuron ×0.5 (unfinished run) | gpt-6-astra, thinking high | 12 budget, run lost | 1,024 | not measured yet | | | |
+
+**Thinking off** (model card sampling, 8k tokens, full sets: 500 MATH-500, 500 GSM8K):
+
+| Edit | MATH-500 | cut | GSM8K | cut |
+|---|---|---|---|---|
+| none (base) | 46.4 ± 2.2 | 31% | 56.6 ± 2.2 | 6% |
+| paper's edit | 42.0 ± 2.2 | 29% | 57.2 ± 2.2 | 3% |
+| Opus, thinking high | 41.8 ± 2.2 | 23% | 54.4 ± 2.2 | 2% |
+| Opus, thinking off | 33.2 ± 2.1 | 20% | 42.0 ± 2.2 | 3% |
+| Astra's neuron (first 250 of each set) | 46.0 ± 3.2 | 28% | 56.4 ± 3.1 | 6% |
+
+What this says:
+
+- Editing works. Opus found 4 neurons that push down "Wait" and amplified them; 4,096 weights out of 750M took the thinking model from 8.4% / 12.4% to 40.0% / 53.2%.
+- It does not beat the paper. The paper's edit, with 50 forward passes against Opus's 7, is ahead by 8 to 12 points. Our run of the paper's checkpoint (52.4% / 61.6%) is close to what the paper reports (48.1% / 67.1%, with more samples per problem), and our base (8.4% / 12.4%) matches theirs (7.9% / 13.8%).
+- Turning thinking off is a strong baseline. The base model with thinking off scores 46.4% / 56.6%, above Opus's edit, and none of the edits help in non-thinking mode. The edits mostly cut the thinking loops; they don't add math skill. Compare any edit against the thinking-off base.
+- A second Opus session (up to 25 forward passes in total) is not in the table. It ran out of steps without submitting, its best variant (36.6% on practice problems against 30.5% for the ×6 edit) is within noise, and its layer-23 change wasn't saved before the GPU pod died.
+- Training-set gains overstate test gains: Opus measured 8.6% → 50.8% on held-out practice problems, but a fresh practice set gave 30.5%.
+
 ## Examples
 
 - `examples/fix_quadrants.py`: fix a sabotaged classifier (runs offline with a scripted LLM if you omit `--llm`)

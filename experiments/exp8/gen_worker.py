@@ -24,7 +24,7 @@ def main(ckpt, inp, out):
     for it in items:
         for s in range(n):
             prompts.append(it["prompt"])
-            params.append(SamplingParams(**SAMPLING, max_tokens=max_tokens, seed=seed_of(it["id"], s)))
+            params.append(SamplingParams(**job.get("sampling", SAMPLING), max_tokens=max_tokens, seed=seed_of(it["id"], s)))
             keys.append((it["id"], s))
     res = llm.generate(prompts, params)
     with open(out, "w") as f:
