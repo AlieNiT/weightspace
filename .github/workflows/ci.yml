@@ -45,3 +45,28 @@ jobs:
           python-version: "3.12"
       - run: pip install build twine
       - run: python -m build && twine check --strict dist/*
+  trees:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        versions: [minimum, current]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[trees,dev]"
+      - if: matrix.versions == 'minimum'
+        run: pip install scikit-learn==1.6.0 xgboost==3.1.0 catboost==1.2.8
+      - run: python -c "import importlib.util; assert importlib.util.find_spec('torch') is None"
+      - run: pytest -q tests/test_trees.py tests/test_tree_categoricals.py
+  numpy-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install -e . pytest
+      - run: pytest -q tests/test_perf_paths.py tests/test_render.py tests/test_space.py -k 'not files'

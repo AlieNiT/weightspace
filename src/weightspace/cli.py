@@ -54,10 +54,19 @@ def main(argv=None) -> int:
         b.add_argument("--fast", dest="speed", action="store_const", const="fast", help="same as --speed fast")
         b.add_argument("--out", help="directory for transcript, result.json, patch.npz")
         b.add_argument("--save-weights", help="write edited weights to .safetensors/.npz")
+        b.add_argument("--save-model", help="write a native predictive tree model")
+        if mode == "write":
+            b.add_argument("--no-zero-init", action="store_true", help="preserve the fitted editable parameters")
         b.add_argument("-v", "--verbose", action="store_true")
 
+    for parser in (a, *[sub.choices[m] for m in ("read", "fix", "write", "improve")]):
+        parser.add_argument("--model-type", choices=("xgboost", "catboost", "random-forest"))
+        parser.add_argument("--allow-pickle", action="store_true", help="allow trusted forest joblib files")
+        parser.add_argument("--catboost-pool", metavar="FILE.py:FN", help="factory returning a categorical reference Pool")
+
     args = ap.parse_args(argv)
-    ws = WeightSpace.from_file(args.path)
+    pool = load_probe(args.catboost_pool).fn() if args.catboost_pool else None
+    ws = WeightSpace.from_file(args.path, model_type=args.model_type, allow_pickle=args.allow_pickle, pool=pool)
 
     if args.cmd == "inspect":
         for n in ws.names(args.pattern):
@@ -75,8 +84,8 @@ def main(argv=None) -> int:
         with open(context[1:]) as f:
             context = f.read()
     if args.cmd == "write":
-        ws.zero_()
-        ws.commit()
+        if not args.no_zero_init:
+            ws.initialize_for_write()
     s = Session(
         ws,
         llm,
@@ -100,6 +109,8 @@ def main(argv=None) -> int:
         res.save(args.out)
     if args.save_weights:
         ws.save(args.save_weights)
+    if args.save_model:
+        ws.save_model(args.save_model)
     return 0 if res.ok else 2
 
 

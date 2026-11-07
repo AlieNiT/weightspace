@@ -1,13 +1,14 @@
 import json
 
 import numpy as np
-import torch
+import pytest
 
 import weightspace as wsp
 from weightspace.llm import ScriptedLLM, call, reply
 
 
 def test_fix_flow_with_scripted_llm(quadrant_mlp, tmp_path):
+    torch = pytest.importorskip("torch")
     model, acc = quadrant_mlp
     with torch.no_grad():
         good_w, good_b = model[2].weight[3].clone(), model[2].bias[3].clone()

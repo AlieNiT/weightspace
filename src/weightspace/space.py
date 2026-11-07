@@ -8,6 +8,7 @@ a sparse patch.
 from __future__ import annotations
 
 import fnmatch
+import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 
@@ -34,6 +35,27 @@ class Store:
 
     def flush(self, names: list[str]) -> None:
         """Push edits of `names` back to the underlying model, if any."""
+
+    @property
+    def model_info(self) -> Mapping:
+        return {}
+
+    def validate(self, arrays=None) -> None:
+        """Validate proposed parameters without changing native state."""
+
+    def describe_tree(self, tree_id, *, offset=0, limit=100):
+        raise TypeError("this store has no trees")
+
+    def initialize_for_write(self):
+        for n in self.names():
+            self.get(n).fill(0)
+        return {}
+
+    def patch_metadata(self, arrays):
+        return None
+
+    def save_model(self, path):
+        raise TypeError("native predictive export is available only for tree models; use save() for arrays")
 
 
 class NumpyStore(Store):
@@ -169,6 +191,7 @@ class WeightSpace:
         self._base_sq: dict[str, float] = {}  # squared L2 norm of each original, computed once
         self._orig_fp: dict[str, tuple] = {}
         self._describe_cache: dict[str, tuple[tuple | None, str]] = {}
+        self.initialization_info: Mapping = {}
         self.R = _ReadOnly(self)
         self.W = _Writable(self)
 
@@ -190,10 +213,38 @@ class WeightSpace:
         return cls.from_torch(load_hf(model_or_name, **kw))
 
     @classmethod
-    def from_file(cls, path: str) -> WeightSpace:
-        from .adapters import load_file
+    def from_file(cls, path: str, *, model_type: str | None = None, allow_pickle: bool = False, pool=None) -> WeightSpace:
+        from .adapters import load_file, load_tree
 
+        if model_type is not None:
+            return load_tree(path, model_type=model_type, allow_pickle=allow_pickle, pool=pool)
         return cls(NumpyStore(load_file(path)))
+
+    @classmethod
+    def from_sklearn(cls, model) -> WeightSpace:
+        from .trees.forest import ForestStore
+
+        return cls(ForestStore(model))
+
+    @classmethod
+    def from_xgboost(cls, model) -> WeightSpace:
+        from .trees.xgboost import XGBoostStore
+
+        return cls(XGBoostStore(model))
+
+    @classmethod
+    def from_catboost(cls, model, *, pool=None) -> WeightSpace:
+        from .trees.catboost import CatBoostStore
+
+        return cls(CatBoostStore(model, pool=pool))
+
+    @property
+    def model_info(self) -> Mapping:
+        """Immutable tree structure and output semantics; empty for tensor stores."""
+        return self._store.model_info
+
+    def describe_tree(self, tree_id: int, *, offset: int = 0, limit: int = 100):
+        return self._store.describe_tree(tree_id, offset=offset, limit=limit)
 
     # reading ----------------------------------------------------------------------
     def names(self, pattern: str | None = None) -> list[str]:
@@ -285,6 +336,15 @@ class WeightSpace:
         if self._on_sync:
             self._on_sync()
 
+    def initialize_for_write(self) -> Mapping:
+        """Initialize editable values, synchronize, and accept the initialized baseline."""
+        for n in self.names():
+            self._snapshot(n)
+        self.initialization_info = self._store.initialize_for_write()
+        self.sync()
+        self.commit()
+        return self.initialization_info
+
     # diff / rollback ----------------------------------------------------------------
     def diff(self) -> DiffSummary:
         out = DiffSummary(total_params=self.numel(), changed_params=0)
@@ -346,6 +406,9 @@ class WeightSpace:
     def patch(self) -> dict[str, np.ndarray]:
         """Sparse patch: `<name>::idx` flat indices and `<name>::val` new values."""
         out: dict[str, np.ndarray] = {}
+        metadata = self._store.patch_metadata({n: self.original(n) for n in self.names()}) if self.model_info else None
+        if metadata is not None:
+            out["__weightspace_tree_patch__"] = np.asarray(json.dumps(metadata, sort_keys=True))
         for name, orig in list(self._original.items()):
             cur = self._store.get(name)
             idx = _chunks.changed_indices(cur, orig)
@@ -361,11 +424,52 @@ class WeightSpace:
         if isinstance(patch, str):
             with np.load(patch) as f:
                 patch = {k: f[k] for k in f.files}
+        metadata = self._store.patch_metadata({n: self._store.get(n) for n in self.names()}) if self.model_info else None
+        if metadata is not None:
+            self._apply_tree_patch(patch, metadata)
+            return
         for key in patch:
             if not key.endswith("::idx"):
                 continue
             name = key[: -len("::idx")]
             self.edit(name).put(patch[key], patch[f"{name}::val"])
+
+    def _apply_tree_patch(self, patch, metadata):
+        key = "__weightspace_tree_patch__"
+        try:
+            supplied = json.loads(str(patch[key].item()))
+        except (KeyError, ValueError, TypeError, AttributeError) as e:
+            raise ValueError("tree patches require versioned compatibility metadata") from e
+        if supplied != metadata:
+            raise ValueError("tree patch backend, schema, topology, or baseline mismatch")
+        proposed = self.to_numpy()
+        edited = set()
+        for entry in patch:
+            if entry == key:
+                continue
+            name, sep, suffix = entry.rpartition("::")
+            if not sep or name not in proposed or suffix not in ("idx", "val"):
+                raise ValueError(f"invalid tree patch entry {entry!r}")
+            if f"{name}::idx" not in patch or f"{name}::val" not in patch:
+                raise ValueError(f"incomplete patch for {name}")
+            edited.add(name)
+        for name in edited:
+            idx, val = np.asarray(patch[f"{name}::idx"]), np.asarray(patch[f"{name}::val"])
+            if (
+                idx.ndim != 1
+                or val.ndim != 1
+                or idx.shape != val.shape
+                or idx.dtype.kind not in "iu"
+                or np.any(idx < 0)
+                or np.any(idx >= proposed[name].size)
+                or np.unique(idx).size != idx.size
+                or val.dtype != proposed[name].dtype
+            ):
+                raise ValueError(f"invalid indices, values, or dtype for {name}")
+            proposed[name].put(idx, val)
+        self._store.validate(proposed)
+        for name in edited:
+            self.set(name, proposed[name])
 
     def to_numpy(self) -> dict[str, np.ndarray]:
         return {n: self._store.get(n).copy() for n in self.names()}
@@ -374,6 +478,11 @@ class WeightSpace:
         from .adapters import save_file
 
         save_file(self.to_numpy(), path)
+
+    def save_model(self, path: str) -> None:
+        """Synchronize and export a predictive tree model in its backend's native format."""
+        self.sync()
+        self._store.save_model(path)
 
     def __repr__(self) -> str:
         return f"WeightSpace({len(self)} tensors, {self.numel():,} weights)"

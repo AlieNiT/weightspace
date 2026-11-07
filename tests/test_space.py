@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import torch
 
 from weightspace import WeightSpace
 
@@ -51,6 +50,7 @@ def test_patch_roundtrip(arrays, tmp_path):
 
 
 def test_torch_float32_is_live():
+    torch = pytest.importorskip("torch")
     m = torch.nn.Linear(3, 2)
     ws = WeightSpace.from_torch(m)
     ws.W["weight"][:] = 0
@@ -58,6 +58,7 @@ def test_torch_float32_is_live():
 
 
 def test_torch_bf16_is_mirrored_and_flushed():
+    torch = pytest.importorskip("torch")
     m = torch.nn.Linear(3, 2).to(torch.bfloat16)
     ws = WeightSpace.from_torch(m)
     assert ws.dtype("weight") == "bfloat16"

@@ -16,6 +16,14 @@ def as_weightspace(model) -> WeightSpace:
         return WeightSpace.from_file(model)
     if isinstance(model, Mapping):
         return WeightSpace.from_numpy(model)
+    # Inspect the type hierarchy before importing an optional backend.
+    modules = {c.__module__.split(".")[0] for c in type(model).__mro__}
+    if "xgboost" in modules:
+        return WeightSpace.from_xgboost(model)
+    if "catboost" in modules:
+        return WeightSpace.from_catboost(model)
+    if "sklearn" in modules:
+        return WeightSpace.from_sklearn(model)
     try:
         import torch
 
@@ -47,8 +55,7 @@ def write(model, spec: str, llm, *, zero_init: bool = True, **kw) -> Result:
     """Program a network from scratch (weights zeroed first unless zero_init=False)."""
     ws = as_weightspace(model)
     if zero_init:
-        ws.zero_()
-        ws.commit()
+        ws.initialize_for_write()
     return _run("write", ws, spec, llm, **kw)
 
 

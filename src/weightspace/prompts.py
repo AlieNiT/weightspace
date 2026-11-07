@@ -12,6 +12,18 @@ Rules:
 - When you are done, call `submit` exactly once with your answer and a confidence between 0 and 1.
 """
 
+TREES = """
+This model is a fixed fitted tree ensemble. Edit only the exposed arrays; never fit or construct trees.
+Use model metadata and describe_tree to map array positions to nodes, features and output groups.
+Numeric splits use the backend's operator and missing route. Categorical sets, encodings, hashes, CTRs,
+and missing routes are immutable. XGBoost sums inference contributions (do not multiply by learning rate).
+CatBoost sums leaf vectors then applies its preserved scale and bias. Forests average tree outputs;
+classification leaves are nonnegative probability vectors summing to one, in the preserved class order.
+CatBoost numeric borders are shared across trees and must remain strictly increasing at float32 precision.
+write programs the existing structure. Validation happens before any probe and at finalization; invalid
+staged values can be corrected or reverted. Training statistics and feature importances are from the original fit.
+"""
+
 MODES = {
     "read": "Task type: READ. Work out the answer from the weights. You cannot change any weights.",
     "fix": (

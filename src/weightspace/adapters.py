@@ -97,6 +97,8 @@ def load_file(path: str) -> dict[str, np.ndarray]:
         if isinstance(obj, dict) and "state_dict" in obj:
             obj = obj["state_dict"]
         return {k: v.float().numpy() for k, v in obj.items() if hasattr(v, "is_floating_point") and v.is_floating_point()}
+    if ext in (".json", ".ubj", ".ubjson", ".cbm", ".joblib"):
+        raise ValueError("native tree files require model_type='xgboost', 'catboost', or 'random-forest'")
     raise ValueError(f"unsupported weights file: {path}")
 
 
@@ -110,3 +112,27 @@ def save_file(tensors: dict[str, np.ndarray], path: str) -> None:
         np.savez_compressed(path, **tensors)  # type: ignore[arg-type]
     else:
         raise ValueError(f"unsupported weights file: {path}")
+
+
+def load_tree(path, *, model_type, allow_pickle=False, pool=None):
+    from .space import WeightSpace
+
+    if model_type == "xgboost":
+        import xgboost
+
+        model = xgboost.Booster()
+        model.load_model(path)
+        return WeightSpace.from_xgboost(model)
+    if model_type == "catboost":
+        import catboost
+
+        model = catboost.CatBoost()
+        model.load_model(path)
+        return WeightSpace.from_catboost(model, pool=pool)
+    if model_type == "random-forest":
+        if not allow_pickle:
+            raise ValueError("forest joblib loading requires allow_pickle=True; load only trusted files")
+        import joblib
+
+        return WeightSpace.from_sklearn(joblib.load(path))
+    raise ValueError("model_type must be xgboost, catboost, or random-forest")

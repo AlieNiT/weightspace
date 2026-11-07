@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
-import torch
 
 
 @pytest.fixture
 def quadrant_mlp():
     """Tiny MLP trained to tell which quadrant a 2D point is in, plus a scorer."""
+    torch = pytest.importorskip("torch")
     torch.manual_seed(0)
     x = torch.randn(2048, 2)
     y = (x[:, 0] > 0).long() * 2 + (x[:, 1] > 0).long()

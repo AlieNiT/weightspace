@@ -24,7 +24,7 @@ Based on [Sparks of Weight-Space Programming](https://rikiyat.github.io/blog/wei
 
 ## What you get
 
-- **Any model.** PyTorch modules, Hugging Face models, or `.safetensors` / `.npz` / `.pt` files. The LLM only ever sees tensors, never the model object.
+- **Models.** PyTorch, Hugging Face, XGBoost, CatBoost, scikit-learn random forests, or `.safetensors` / `.npz` / `.pt` files. The LLM sees arrays and immutable tree descriptions; the model stays private.
 - **Four tasks.** `read` (what does this network do?), `fix` (find and fix the cause of a failure), `write` (program a network from zero), `improve` (make it better at a goal).
 - **Tools for the LLM.** List, describe (norms, SVD) and read tensor slices; a persistent Python sandbox over the weights; edits, checkpoints and rollbacks.
 - **Budgeted forward passes.** You decide how the network may be run (scores, rollouts, generations, attention maps only...) by writing a `probe`, and how many times.
@@ -35,7 +35,7 @@ Based on [Sparks of Weight-Space Programming](https://rikiyat.github.io/blog/wei
 ## Install
 
 ```bash
-pip install "weightspace[all]"   # or pick: [torch] [hf] [openai] [anthropic]
+pip install "weightspace[all]"   # or pick: [torch] [hf] [trees] [sklearn] [xgboost] [catboost] [openai] [anthropic]
 export OPENAI_API_KEY=...      # or ANTHROPIC_API_KEY / OPENROUTER_API_KEY
 ```
 
@@ -77,6 +77,41 @@ wsp.read(model, "What does this network compute?", llm=..., text_mode=True)  # w
 wsp.write(model, "Play Breakout: move the paddle under the ball.", llm=..., context=GAME_RULES)  # zeroes first
 wsp.improve(hf_model, "Stop the reasoning loops.", llm=..., probes=[generate], forward_budget=25)
 ```
+
+## Tree ensembles
+
+All four tasks also work on an **existing fitted tree structure**. Install `weightspace[trees]` or a single backend extra; Torch is optional.
+
+| Backend | Versions | Models | Editable parameters |
+|---|---|---|---|
+| scikit-learn | `>=1.6,<2` | RandomForestClassifier / RandomForestRegressor | Leaf outputs and numeric thresholds |
+| XGBoost | `>=3.1,<4` | Booster / XGBClassifier / XGBRegressor, `gbtree` | Inference leaf contributions and numeric thresholds |
+| CatBoost | `>=1.2.8,<1.3` | Symmetric classifiers and regressors | Leaf vectors and safe shared numeric borders |
+
+Scalar regression, binary classification and multiclass classification are supported. XGBoost and CatBoost retain native categorical rules, encodings, missing routes and output transformations. Forest inputs must be numeric or externally encoded. Ranking, multi-output targets, XGBoost linear/DART and CatBoost asymmetric/text/embedding models are rejected.
+
+```python
+ws = wsp.WeightSpace.from_xgboost(fitted_model)  # or from_sklearn(fitted_forest)
+# Categorical CatBoost needs a private reference pool for reloadable JSON export:
+# ws = wsp.WeightSpace.from_catboost(fitted_model, pool=reference_pool)
+print(ws.model_info)
+print(ws.describe_tree(0, offset=0, limit=100))
+res = wsp.fix(ws, "Inspect the leaf contributions and fix the described bias.", llm=...)
+ws.save_model("edited.json")  # XGBoost .json/.ubj; CatBoost .cbm; forest joblib
+```
+
+`trees.<id>.leaf_values` has shape `(leaf_count, output_dimension)` (one column per XGBoost tree, with its output group in metadata). Forest classification leaves are probability vectors in class order; invalid probabilities are rejected. Numeric thresholds use `trees.<id>.thresholds`; CatBoost shares `features.<id>.borders` across trees. Features, nodes, tree counts, category rules and output dimensions stay fixed. `write()` initializes this fitted structure; it does not fit or construct trees. Use `zero_init=False` to keep current values.
+
+Edits synchronize into the supplied object before probes. Invalid edits keep native predictions at the last valid state and remain staged for correction. `save()` / `--save-weights` export arrays only and cannot reconstruct a tree model. Native export uses `save_model()` / `--save-model`. Native file loading requires `model_type="xgboost"`, `"catboost"` or `"random-forest"`; forest joblib loading additionally requires `allow_pickle=True` and must only be used for trusted files.
+
+```bash
+weightspace inspect model.json --model-type xgboost
+weightspace inspect forest.joblib --model-type random-forest --allow-pickle
+weightspace inspect model.cbm --model-type catboost --catboost-pool reference.py:make_pool
+weightspace fix model.json "Correct the leaf bias" --model-type xgboost --llm openai:gpt-5 --save-model edited.json
+```
+
+See [tree semantics and initialization](docs/concepts.md#tree-parameters) and offline scripted examples for [forests](examples/tree_forest.py), [XGBoost](examples/tree_xgboost.py) and [categorical CatBoost](examples/tree_catboost.py).
 
 ## Thinking on or off
 

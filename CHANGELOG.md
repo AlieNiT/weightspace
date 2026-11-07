@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- Fixed-structure XGBoost (`>=3.1,<4`), CatBoost (`>=1.2.8,<1.3`) and scikit-learn random forest (`>=1.6,<2`) adapters for all four tasks, including native XGBoost and CatBoost categoricals.
+- Immutable `model_info`, bounded `describe_tree`, staged validation and atomic native updates, compatible tree patches, and `initialize_for_write()` with backend-specific initialization.
+- Native predictive `save_model()` and explicit `from_file(model_type=...)`; CLI `--model-type`, `--allow-pickle`, `--catboost-pool`, `--save-model` and `write --no-zero-init`.
+- Optional `[sklearn]`, `[xgboost]`, `[catboost]`, `[trees]` extras, offline scripted examples and tree-only minimum/current dependency CI.
+
+### Fixed
+- Final synchronization failures now set `stop_reason="error"` and `Result.ok=False` while retaining diagnostics and transcripts.
+
 ## [0.3.0] - 2026-11-03
 
 ### Added

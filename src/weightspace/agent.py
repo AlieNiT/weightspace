@@ -6,7 +6,7 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -18,7 +18,7 @@ from .probes import Probe
 from .render import extract_blocks, fmt_array, parse_index, parse_weights, render_space
 from .result import ForwardCall, Result
 from .sandbox import Sandbox
-from .space import WeightSpace
+from .space import DiffSummary, WeightSpace
 from .tools import Tool, tool
 from .usage import Pricing, Usage
 
@@ -104,7 +104,9 @@ class Session:
         self.speed = normalize_speed(speed)
         if self.speed is not None:
             self.llm.speed = self.speed
-        self.system_prompt = system_prompt or prompts.SYSTEM
+        self.system_prompt = system_prompt if system_prompt is not None else prompts.SYSTEM
+        if system_prompt is None and ws.model_info:
+            self.system_prompt += prompts.TREES
         if self.thinking == "off":
             self.system_prompt += prompts.NO_THINKING
         self.log_path = log_path
@@ -175,6 +177,17 @@ class Session:
                 precision={"type": "integer", "optional": True},
             )(self._read_tensor),
         ]
+        if ws.model_info:
+            out.append(
+                tool(
+                    "describe_tree",
+                    "Read immutable split rules and node/leaf mappings. At most 100 entries per call.",
+                    parallel=True,
+                    tree_id={"type": "integer"},
+                    offset={"type": "integer", "optional": True},
+                    limit={"type": "integer", "optional": True},
+                )(ws.describe_tree)
+            )
         if self.sandbox:
             names = "np, torch, R (read-only weights)" + (
                 ", W (writable weights: edit in place or assign W[name] = array), diff(), checkpoint(label), "
@@ -399,6 +412,10 @@ class Session:
         parts = [prompts.MODES[self.mode], f"## Task\n{task}"]
         if self.context:
             parts.append(f"## Context\n{self.context}")
+        if self.ws.model_info:
+            parts.append("## Tree model\n" + json.dumps(self.ws.model_info, default=_jsonable))
+            if self.ws.initialization_info:
+                parts.append("## Write initialization\n" + json.dumps(self.ws.initialization_info, default=_jsonable))
         parts.append(f"## Weights ({len(names)} tensors, {self.ws.numel():,} weights)\n{inv}")
         parts.append(f"## Forward passes (budget {self.forward_budget})\n{probes}")
         return "\n\n".join(parts)
@@ -465,11 +482,22 @@ class Session:
     def run_text(self, task: str, precision: int = 3, max_chars: int = 2_000_000) -> Result:
         """No tools: all weights go into the prompt, one reply comes back (Experiments 1-5 style)."""
         dump = render_space(self.ws, precision)
-        if len(dump) > max_chars:
-            raise ValueError(f"weights render to {len(dump):,} chars (> {max_chars:,}); use run() with tools instead")
-        self._start(task)
         fmt = prompts.TEXT_MODE_EDIT if self.can_edit else prompts.TEXT_MODE_READ
         user = f"{self._intro(task).split('## Weights')[0]}## Weights\n{dump}\n\n{fmt}"
+        if self.ws.model_info:
+            for tree_id in range(self.ws.model_info["tree_count"]):
+                offset = 0
+                while True:
+                    page = self.ws.describe_tree(tree_id, offset=offset)
+                    user += "\n" + json.dumps(page, default=_jsonable)
+                    offset += len(page["nodes"])
+                    if len(user) + len(self.system_prompt) > max_chars:
+                        raise ValueError(f"weights and structure exceed {max_chars:,} chars; use run() with tools instead")
+                    if offset >= page["total"]:
+                        break
+        if len(user) + len(self.system_prompt) > max_chars:
+            raise ValueError(f"weights and structure exceed {max_chars:,} chars; use run() with tools instead")
+        self._start(task)
         messages: list[dict] = []
         for m in ({"role": "system", "content": self.system_prompt}, {"role": "user", "content": user}):
             self._append(messages, m, 0)
@@ -508,6 +536,15 @@ class Session:
             self.ws.sync()
         except Exception as e:  # never lose the transcript because a flush failed
             error = error or f"sync failed: {type(e).__name__}: {e}"
+            stop_reason = "error"
+        try:
+            diff = self.ws.diff()
+        except Exception as e:
+            # A malformed staging array can make even a numerical diff impossible.
+            # Keep the result and staged arrays available for inspection/correction.
+            diff = DiffSummary(total_params=self.ws.numel(), changed_params=0)
+            error = f"{error + '; ' if error else ''}diff unavailable: {type(e).__name__}: {e}"
+            stop_reason = "error"
         answer, conf = self._answer or ("", None)
         seconds = time.monotonic() - self._t0
         res = Result(
@@ -515,7 +552,7 @@ class Session:
             confidence=conf,
             mode=self.mode,
             thinking=self.thinking,
-            diff=self.ws.diff(),
+            diff=diff,
             forward_calls=self.forward_calls,
             forward_budget=self.forward_budget,
             steps=steps,
@@ -555,6 +592,8 @@ def _field(text: str, key: str) -> str | None:
 
 
 def _jsonable(o):
+    if isinstance(o, Mapping):
+        return dict(o)
     if isinstance(o, np.ndarray):
         return o.tolist()
     if isinstance(o, np.generic):
